@@ -13,5 +13,6 @@ struct LocalTutorApp: App {
         WindowGroup {
             ContentView()
         }
+        .defaultSize(width: 1180, height: 760)
     }
 }

@@ -20,6 +20,7 @@ final class ModelLabViewModel: ObservableObject {
     @Published var output = ""
     @Published var statusMessage = "Ready"
     @Published var downloadProgress: Double?
+    @Published var isDownloading = false
     @Published var isRunning = false
     @Published var latestRecord: BenchmarkRecord?
     @Published var latestRecordURL: URL?
@@ -28,6 +29,7 @@ final class ModelLabViewModel: ObservableObject {
     private let runner: LocalModelRunner
     private let store: BenchmarkStore
     private var runTask: Task<Void, Never>?
+    private var downloadPhaseHasEnded = false
 
     init(runner: LocalModelRunner = LocalModelRunner(), store: BenchmarkStore = BenchmarkStore()) {
         self.runner = runner
@@ -70,6 +72,8 @@ final class ModelLabViewModel: ObservableObject {
         latestRecordURL = nil
         errorMessage = nil
         downloadProgress = nil
+        isDownloading = false
+        downloadPhaseHasEnded = false
 
         guard preflight.canRun else {
             let record = BenchmarkRecord.skipped(
@@ -103,6 +107,8 @@ final class ModelLabViewModel: ObservableObject {
                 await MainActor.run {
                     errorMessage = error.localizedDescription
                     statusMessage = error.localizedDescription
+                    isDownloading = false
+                    downloadPhaseHasEnded = true
                     isRunning = false
                 }
             }
@@ -120,6 +126,8 @@ final class ModelLabViewModel: ObservableObject {
             await MainActor.run {
                 statusMessage = "Model unloaded"
                 downloadProgress = nil
+                isDownloading = false
+                downloadPhaseHasEnded = true
             }
         }
     }
@@ -131,6 +139,8 @@ final class ModelLabViewModel: ObservableObject {
                 await MainActor.run {
                     statusMessage = "Model cache cleared"
                     downloadProgress = nil
+                    isDownloading = false
+                    downloadPhaseHasEnded = true
                 }
             } catch {
                 await MainActor.run {
@@ -149,10 +159,19 @@ final class ModelLabViewModel: ObservableObject {
         switch event {
         case .stage(let message):
             statusMessage = message
+            if Self.stageEndsDownload(message) {
+                isDownloading = false
+                downloadProgress = nil
+                downloadPhaseHasEnded = true
+            }
 
-        case .downloadProgress(let fraction, let description):
-            downloadProgress = fraction
-            statusMessage = "Downloading \(description)"
+        case .downloadProgress(let update):
+            guard !downloadPhaseHasEnded else {
+                return
+            }
+            isDownloading = true
+            downloadProgress = update.fraction
+            statusMessage = update.message
 
         case .outputChunk(let chunk):
             output += chunk
@@ -175,6 +194,8 @@ final class ModelLabViewModel: ObservableObject {
         }
         statusMessage = status
         downloadProgress = nil
+        isDownloading = false
+        downloadPhaseHasEnded = true
         isRunning = false
     }
 
@@ -189,5 +210,12 @@ final class ModelLabViewModel: ObservableObject {
         case .skipped:
             record.errorMessage ?? "Skipped"
         }
+    }
+
+    private static func stageEndsDownload(_ message: String) -> Bool {
+        message.hasPrefix("Loaded")
+            || message.hasPrefix("Using loaded")
+            || message == "Preparing prompt"
+            || message == "Generating"
     }
 }

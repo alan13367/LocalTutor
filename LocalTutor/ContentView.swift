@@ -9,7 +9,8 @@ import SwiftUI
 
 struct ContentView: View {
     var body: some View {
-        ModelLabView()
+        StudyWorkspaceView()
+            .frame(minWidth: 960, minHeight: 660)
     }
 }
 

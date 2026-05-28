@@ -15,7 +15,7 @@ import Tokenizers
 
 enum LocalModelRunnerEvent: Sendable {
     case stage(String)
-    case downloadProgress(Double, String)
+    case downloadProgress(DownloadProgressUpdate)
     case outputChunk(String)
 }
 
@@ -200,6 +200,7 @@ actor LocalModelRunner {
 
         await events(.stage("Loading \(profile.name)"))
         let tracker = DownloadProgressTracker()
+        await events(.downloadProgress(tracker.start(message: "Checking model cache")))
         let cacheURL = try AppDirectories.huggingFaceCache()
         let hubClient = HubClient(
             userAgent: "LocalTutor/\(AppInfo.version)",
@@ -211,7 +212,7 @@ actor LocalModelRunner {
         let progressHandler: @Sendable (Progress) -> Void = { progress in
             let update = tracker.update(progress)
             Task {
-                await events(.downloadProgress(update.fraction, update.description))
+                await events(.downloadProgress(update))
             }
         }
 

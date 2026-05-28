@@ -10,24 +10,24 @@ import Darwin
 
 struct MemoryPreflightResult: Equatable, Sendable {
     var canRun: Bool
-    var availableBytes: UInt64
+    var systemMemoryBytes: UInt64
     var requiredBytes: UInt64
     var message: String
 }
 
 enum MemoryPreflight {
-    static func evaluate(profile: InferenceProfile, availableBytes: UInt64 = SystemMemory.availableBytes()) -> MemoryPreflightResult {
-        let requiredBytes = profile.minimumAvailableMemoryBytes
-        let canRun = availableBytes >= requiredBytes
-        let available = ByteCountFormatter.localTutorMemoryString(fromByteCount: Int64(availableBytes))
+    static func evaluate(profile: InferenceProfile, systemMemoryBytes: UInt64 = SystemMemory.totalBytes()) -> MemoryPreflightResult {
+        let requiredBytes = profile.minimumSystemMemoryBytes
+        let canRun = systemMemoryBytes >= requiredBytes
+        let systemMemory = ByteCountFormatter.localTutorMemoryString(fromByteCount: Int64(systemMemoryBytes))
         let required = ByteCountFormatter.localTutorMemoryString(fromByteCount: Int64(requiredBytes))
         let message = canRun
-            ? "Available memory \(available) meets \(required) requirement."
-            : "Not enough memory for \(profile.name). Available \(available), requires \(required)."
+            ? "System memory \(systemMemory) meets \(required) requirement."
+            : "Not enough system memory for \(profile.name). This Mac has \(systemMemory), requires \(required)."
 
         return MemoryPreflightResult(
             canRun: canRun,
-            availableBytes: availableBytes,
+            systemMemoryBytes: systemMemoryBytes,
             requiredBytes: requiredBytes,
             message: message
         )
@@ -35,6 +35,10 @@ enum MemoryPreflight {
 }
 
 enum SystemMemory {
+    static func totalBytes() -> UInt64 {
+        ProcessInfo.processInfo.physicalMemory
+    }
+
     static func availableBytes() -> UInt64 {
         var stats = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)

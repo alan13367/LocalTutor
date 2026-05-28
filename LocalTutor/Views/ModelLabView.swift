@@ -87,7 +87,7 @@ struct ModelLabView: View {
             HStack(spacing: 10) {
                 Label(viewModel.selectedProfile.tierLabel, systemImage: "memorychip")
                 Label(viewModel.selectedProfile.kind.rawValue.capitalized, systemImage: "eye")
-                Label("Requires \(viewModel.selectedProfile.minimumAvailableMemoryDescription)", systemImage: "gauge.with.dots.needle.33percent")
+                Label("Needs \(viewModel.selectedProfile.minimumSystemMemoryDescription) Mac", systemImage: "gauge.with.dots.needle.33percent")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -194,8 +194,8 @@ struct ModelLabView: View {
             }
 
             HStack(spacing: 10) {
-                if let progress = viewModel.downloadProgress {
-                    ProgressView(value: progress)
+                if viewModel.isDownloading {
+                    DownloadProgressMeter(fraction: viewModel.downloadProgress)
                         .frame(width: 180)
                 } else if viewModel.isRunning {
                     ProgressView()
@@ -263,7 +263,7 @@ struct ModelLabView: View {
                     MetricRow("MLX Peak", record.mlxMemoryAfter?.peakBytes.gibibytesDescription ?? "n/a")
                 } else {
                     MetricRow("Status", "No run yet")
-                    MetricRow("Device RAM", ProcessInfo.processInfo.physicalMemory.gibibytesDescription)
+                    MetricRow("System RAM", SystemMemory.totalBytes().gibibytesDescription)
                     MetricRow("Available", SystemMemory.availableBytes().gibibytesDescription)
                 }
             }

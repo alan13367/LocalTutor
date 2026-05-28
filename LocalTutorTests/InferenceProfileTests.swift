@@ -19,5 +19,9 @@ struct InferenceProfileTests {
             "mlx-community/gemma-4-e2b-it-4bit",
             "mlx-community/gemma-4-e4b-it-4bit"
         ])
+        #expect(profiles.map(\.minimumSystemMemoryBytes) == [
+            8.gibibytes,
+            16.gibibytes
+        ])
     }
 }

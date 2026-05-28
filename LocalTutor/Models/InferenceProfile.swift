@@ -63,12 +63,12 @@ struct InferenceProfile: Identifiable, Sendable {
     let modelIdentifier: String
     let kind: InferenceProfileKind
     let tier: InferenceTier
-    let minimumAvailableMemoryBytes: UInt64
+    let minimumSystemMemoryBytes: UInt64
     let defaults: GenerationDefaults
     let configuration: ProfileModelConfiguration
 
-    var minimumAvailableMemoryDescription: String {
-        ByteCountFormatter.localTutorMemoryString(fromByteCount: Int64(minimumAvailableMemoryBytes))
+    var minimumSystemMemoryDescription: String {
+        ByteCountFormatter.localTutorMemoryString(fromByteCount: Int64(minimumSystemMemoryBytes))
     }
 }
 
@@ -80,7 +80,7 @@ extension InferenceProfile {
         modelIdentifier: "mlx-community/gemma-4-e2b-it-4bit",
         kind: .vision,
         tier: .eightGB,
-        minimumAvailableMemoryBytes: 3.gibibytes,
+        minimumSystemMemoryBytes: 8.gibibytes,
         defaults: .vision,
         configuration: .vlm(VLMRegistry.gemma4_E2B_it_4bit)
     )
@@ -92,7 +92,7 @@ extension InferenceProfile {
         modelIdentifier: "mlx-community/gemma-4-e4b-it-4bit",
         kind: .vision,
         tier: .sixteenGB,
-        minimumAvailableMemoryBytes: 6.gibibytes,
+        minimumSystemMemoryBytes: 16.gibibytes,
         defaults: .vision,
         configuration: .vlm(VLMRegistry.gemma4_E4B_it_4bit)
     )

@@ -10,25 +10,26 @@ import Testing
 
 struct MemoryPreflightTests {
     @Test
-    func preflightPassesWhenAvailableMemoryMeetsProfileRequirement() {
+    func preflightPassesWhenSystemMemoryMeetsProfileRequirement() {
         let profile = InferenceProfile.gemma4E2B
         let result = MemoryPreflight.evaluate(
             profile: profile,
-            availableBytes: profile.minimumAvailableMemoryBytes
+            systemMemoryBytes: profile.minimumSystemMemoryBytes
         )
 
         #expect(result.canRun)
+        #expect(result.message.contains("System memory"))
     }
 
     @Test
-    func preflightSkipsWhenAvailableMemoryIsBelowProfileRequirement() {
+    func preflightSkipsWhenSystemMemoryIsBelowProfileRequirement() {
         let profile = InferenceProfile.gemma4E4B
         let result = MemoryPreflight.evaluate(
             profile: profile,
-            availableBytes: profile.minimumAvailableMemoryBytes - 1
+            systemMemoryBytes: profile.minimumSystemMemoryBytes - 1
         )
 
         #expect(!result.canRun)
-        #expect(result.message.contains("Not enough memory"))
+        #expect(result.message.contains("Not enough system memory"))
     }
 }

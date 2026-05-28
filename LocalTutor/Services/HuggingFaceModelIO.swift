@@ -28,14 +28,18 @@ struct HuggingFaceModelDownloader: Downloader {
             throw HuggingFaceModelIOError.invalidRepositoryID(id)
         }
 
-        return try await hubClient.downloadSnapshot(
-            of: repositoryID,
-            revision: revision ?? "main",
-            matching: patterns,
-            progressHandler: { @MainActor progress in
-                progressHandler(progress)
-            }
-        )
+        do {
+            return try await hubClient.downloadSnapshot(
+                of: repositoryID,
+                revision: revision ?? "main",
+                matching: patterns,
+                progressHandler: { @MainActor progress in
+                    progressHandler(progress)
+                }
+            )
+        } catch {
+            throw HuggingFaceModelIOError.downloadFailed(id, error.localizedDescription)
+        }
     }
 }
 
@@ -100,11 +104,14 @@ private struct TransformersTokenizerBridge: MLXLMCommon.Tokenizer {
 
 enum HuggingFaceModelIOError: LocalizedError {
     case invalidRepositoryID(String)
+    case downloadFailed(String, String)
 
     var errorDescription: String? {
         switch self {
         case .invalidRepositoryID(let id):
             "Invalid Hugging Face repository id: \(id)."
+        case .downloadFailed(let id, let reason):
+            "Could not download \(id): \(reason)"
         }
     }
 }
