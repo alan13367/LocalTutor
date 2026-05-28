@@ -2,7 +2,6 @@
 //  StudyWorkspaceView.swift
 //  LocalTutor
 //
-//  Created by Codex on 28/05/2026.
 //
 
 import SwiftUI
@@ -12,24 +11,18 @@ struct StudyWorkspaceView: View {
     @StateObject private var viewModel = StudyWorkspaceViewModel()
     @State private var isImportingSources = false
     @State private var isDropTargeted = false
+    @State private var isShowingSettings = false
 
     var body: some View {
         NavigationSplitView {
-            sidebar
-                .navigationSplitViewColumnWidth(min: 240, ideal: 280)
+            StudySidebar(
+                viewModel: viewModel,
+                onAttach: { isImportingSources = true },
+                onOpenSettings: { isShowingSettings = true }
+            )
+            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
         } detail: {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    header
-                    sourceIntake
-                    resourcePicker
-                    studyGoal
-                    outputArea
-                }
-                .padding(28)
-                .frame(maxWidth: 1160, alignment: .leading)
-            }
-            .background(Color(nsColor: .windowBackgroundColor))
+            detailSurface
         }
         .navigationTitle("LocalTutor")
         .toolbar {
@@ -37,24 +30,29 @@ struct StudyWorkspaceView: View {
                 Button {
                     isImportingSources = true
                 } label: {
-                    Label("Add Sources", systemImage: "plus")
+                    Label("Add sources", systemImage: "paperclip")
                 }
+                .help("Attach files")
+
+                Button(role: .destructive) {
+                    viewModel.clearTranscript()
+                } label: {
+                    Label("New session", systemImage: "square.and.pencil")
+                }
+                .disabled(viewModel.turns.isEmpty || viewModel.isRunning)
+                .help("Start a fresh session")
 
                 Button {
-                    viewModel.generate()
+                    isShowingSettings = true
                 } label: {
-                    Label("Generate", systemImage: "sparkles")
+                    Label("Settings", systemImage: "slider.horizontal.3")
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!viewModel.canGenerate)
-
-                Button {
-                    viewModel.cancel()
-                } label: {
-                    Label("Cancel", systemImage: "stop.fill")
-                }
-                .disabled(!viewModel.isRunning)
+                .help("Settings and models")
+                .keyboardShortcut(",", modifiers: .command)
             }
+        }
+        .sheet(isPresented: $isShowingSettings) {
+            SettingsView(viewModel: viewModel)
         }
         .fileImporter(
             isPresented: $isImportingSources,
@@ -65,302 +63,231 @@ struct StudyWorkspaceView: View {
             case .success(let urls):
                 viewModel.importURLs(urls)
             case .failure(let error):
-                viewModel.errorMessage = error.localizedDescription
+                viewModel.globalError = error.localizedDescription
             }
         }
     }
 
-    private var sidebar: some View {
-        List {
-            Section("Session") {
-                Label("Workspace", systemImage: "square.grid.2x2")
-                Label(viewModel.sourceSummary, systemImage: "tray.full")
-            }
+    private var detailSurface: some View {
+        ZStack(alignment: .bottom) {
+            backgroundGradient
+                .ignoresSafeArea()
 
-            Section("Sources") {
-                if viewModel.sources.isEmpty {
-                    Text("No sources")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.sources.prefix(8)) { source in
-                        Label {
-                            Text(source.displayName)
+            VStack(spacing: 0) {
+                if let error = viewModel.globalError {
+                    GlobalErrorBanner(message: error) {
+                        viewModel.globalError = nil
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 16)
+                }
+
+                StudyTranscriptView(viewModel: viewModel, onAttach: { isImportingSources = true })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                StudyComposer(viewModel: viewModel, onAttach: { isImportingSources = true })
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 18)
+                    .padding(.top, 6)
+                    .frame(maxWidth: 920)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .overlay(FullWindowDropOverlay(isActive: isDropTargeted))
+        .onDrop(
+            of: [UTType.fileURL],
+            isTargeted: $isDropTargeted,
+            perform: viewModel.importFromDropProviders
+        )
+        .animation(.easeOut(duration: 0.2), value: viewModel.turns.count)
+    }
+
+    private var backgroundGradient: some View {
+        LinearGradient(
+            colors: [
+                Color(nsColor: .windowBackgroundColor),
+                Color(nsColor: .windowBackgroundColor).opacity(0.85)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+}
+
+// MARK: - Sidebar
+
+private struct StudySidebar: View {
+    @ObservedObject var viewModel: StudyWorkspaceViewModel
+    var onAttach: () -> Void
+    var onOpenSettings: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            List {
+                Section {
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.accentColor.opacity(0.16))
+                                .frame(width: 30, height: 30)
+                            Image(systemName: "graduationcap.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Study Session")
+                                .font(.headline)
+                            Text(viewModel.activeProfile.name)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                                 .lineLimit(1)
-                                .truncationMode(.middle)
-                        } icon: {
-                            Image(systemName: source.kind.systemImage)
                         }
                     }
-
-                    if viewModel.sources.count > 8 {
-                        Text("+ \(viewModel.sources.count - 8) more")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Section("Model") {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(viewModel.activeProfile.name, systemImage: "memorychip")
-                    Text(viewModel.activeProfile.studyTierLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(SystemMemory.totalBytes().gibibytesDescription)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                    .padding(.vertical, 2)
                 }
 
-                Button {
-                    viewModel.unloadModel()
-                } label: {
-                    Label("Unload", systemImage: "eject")
-                }
-            }
-        }
-        .listStyle(.sidebar)
-        .navigationTitle("LocalTutor")
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Study Session")
-                        .font(.largeTitle.weight(.semibold))
-                    Text("Local model: \(viewModel.activeProfile.name)")
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                ModelReadinessPill(preflight: viewModel.preflight)
-            }
-
-            if let errorMessage = viewModel.errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 10)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-            }
-        }
-    }
-
-    private var sourceIntake: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Sources", detail: viewModel.sourceSummary)
-
-            StudyDropZone(isTargeted: isDropTargeted) {
-                isImportingSources = true
-            }
-            .onDrop(
-                of: [UTType.fileURL.identifier],
-                isTargeted: $isDropTargeted,
-                perform: viewModel.importFromDropProviders
-            )
-
-            if !viewModel.sources.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(viewModel.sources) { source in
-                        SourceRow(source: source) {
-                            viewModel.removeSource(source)
+                Section("Sources") {
+                    if viewModel.sources.isEmpty {
+                        Button(action: onAttach) {
+                            Label("Add files", systemImage: "plus")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        ForEach(viewModel.sources) { source in
+                            HStack(spacing: 8) {
+                                Image(systemName: source.kind.systemImage)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 16)
+                                Text(source.displayName)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer()
+                                Button {
+                                    viewModel.removeSource(source)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
 
-                        if source.id != viewModel.sources.last?.id {
-                            Divider()
+                        Button(role: .destructive) {
+                            viewModel.clearSources()
+                        } label: {
+                            Label("Clear all", systemImage: "trash")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !viewModel.turns.isEmpty {
+                    Section("This session") {
+                        ForEach(viewModel.turns) { turn in
+                            HStack(spacing: 8) {
+                                Image(systemName: turn.user.resourceKind.systemImage)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 16)
+                                Text(turn.user.displayPrompt)
+                                    .lineLimit(1)
+                            }
                         }
                     }
                 }
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(.separator.opacity(0.45))
-                }
-
-                Button {
-                    viewModel.clearSources()
-                } label: {
-                    Label("Clear Sources", systemImage: "trash")
-                }
-                .controlSize(.small)
             }
+            .listStyle(.sidebar)
+
+            Divider()
+            modelFooter
         }
     }
 
-    private var resourcePicker: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "Create", detail: viewModel.selectedResource.title)
-
-            Picker("Create", selection: $viewModel.selectedResource) {
-                ForEach(StudyResourceKind.allCases) { resource in
-                    Label(resource.title, systemImage: resource.systemImage)
-                        .tag(resource)
+    private var modelFooter: some View {
+        Button(action: onOpenSettings) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.16))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "cpu")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
                 }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-        }
-    }
 
-    private var studyGoal: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "Focus", detail: "What should LocalTutor help with?")
-
-            TextEditor(text: $viewModel.studyGoal)
-                .font(.body)
-                .frame(minHeight: 112)
-                .scrollContentBackground(.hidden)
-                .padding(10)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(.separator.opacity(0.45))
-                }
-        }
-    }
-
-    private var outputArea: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                SectionHeader(title: "Tutor Output", detail: viewModel.statusMessage)
-
-                Spacer()
-
-                if viewModel.isDownloading {
-                    DownloadProgressMeter(fraction: viewModel.downloadProgress)
-                        .frame(width: 180)
-                } else if viewModel.isRunning {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-            }
-
-            ScrollView {
-                Text(viewModel.output.isEmpty ? "Generated study material appears here." : viewModel.output)
-                    .foregroundStyle(viewModel.output.isEmpty ? .tertiary : .primary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, minHeight: 240, alignment: .topLeading)
-                    .padding(14)
-            }
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(.separator.opacity(0.45))
-            }
-        }
-    }
-}
-
-private struct SectionHeader: View {
-    var title: String
-    var detail: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.headline)
-            Text(detail)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-private struct ModelReadinessPill: View {
-    var preflight: MemoryPreflightResult
-
-    var body: some View {
-        Label(preflight.canRun ? "Ready" : "Model unavailable", systemImage: preflight.canRun ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-            .font(.callout.weight(.medium))
-            .foregroundStyle(preflight.canRun ? .green : .orange)
-            .padding(.vertical, 6)
-            .padding(.horizontal, 10)
-            .background(.thinMaterial, in: Capsule())
-            .help(preflight.message)
-    }
-}
-
-private struct StudyDropZone: View {
-    var isTargeted: Bool
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: "tray.and.arrow.down")
-                    .font(.title2)
-                    .frame(width: 34, height: 34)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Drop study files here")
-                        .font(.headline)
-                    Text("PDF, Word, PowerPoint, Excel, text, and screenshots")
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(viewModel.activeProfile.name)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text("\(viewModel.activeProfile.tierLabel) · \(SystemMemory.totalBytes().gibibytesDescription)")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
-                Spacer()
+                Spacer(minLength: 4)
 
-                Image(systemName: "plus.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(.tint)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, minHeight: 92)
-            .background(isTargeted ? Color.accentColor.opacity(0.14) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isTargeted ? Color.accentColor : Color.secondary.opacity(0.25), style: StrokeStyle(lineWidth: 1.2, dash: [6, 5]))
-            }
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct SourceRow: View {
-    var source: StudySource
-    var remove: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: source.kind.systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(source.displayName)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(source.kind.label)
-                    .font(.caption)
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
-
-            Spacer()
-
-            Button(action: remove) {
-                Label("Remove", systemImage: "xmark.circle.fill")
-            }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Remove")
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.thinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(.vertical, 9)
-        .padding(.horizontal, 12)
+        .buttonStyle(.plain)
+        .help("Open settings and choose a model")
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
     }
 }
 
-private extension InferenceProfile {
-    var studyTierLabel: String {
-        switch tier {
-        case .eightGB:
-            "8GB baseline"
-        case .sixteenGB:
-            "16GB tier"
+// MARK: - Global error banner
+
+private struct GlobalErrorBanner: View {
+    let message: String
+    var onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
         }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.regularMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 0.7)
+        )
     }
 }
 
 #Preview {
     StudyWorkspaceView()
+        .frame(width: 1180, height: 760)
 }

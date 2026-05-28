@@ -2,7 +2,6 @@
 //  HuggingFaceModelIO.swift
 //  LocalTutor
 //
-//  Created by Codex on 28/05/2026.
 //
 
 import Foundation

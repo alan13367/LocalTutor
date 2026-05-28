@@ -2,7 +2,6 @@
 //  LocalModelRunner.swift
 //  LocalTutor
 //
-//  Created by Codex on 28/05/2026.
 //
 
 import Foundation
@@ -45,6 +44,8 @@ actor LocalModelRunner {
         profile: InferenceProfile,
         prompt: String,
         imageURL: URL?,
+        maxTokens: Int? = nil,
+        temperature: Float? = nil,
         events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
     ) async throws -> BenchmarkRecord {
         guard !isRunning else {
@@ -100,9 +101,13 @@ actor LocalModelRunner {
 
             try Task.checkCancellation()
             await events(.stage("Generating"))
+            let parameters = profile.defaults.generateParameters(
+                maxTokensOverride: maxTokens,
+                temperatureOverride: temperature
+            )
             let stream = try await container.generate(
                 input: preparedInput,
-                parameters: profile.defaults.generateParameters
+                parameters: parameters
             )
 
             for await generation in stream {
@@ -269,12 +274,12 @@ private struct LoadedContainer: Sendable {
 }
 
 private extension GenerationDefaults {
-    var generateParameters: GenerateParameters {
+    func generateParameters(maxTokensOverride: Int? = nil, temperatureOverride: Float? = nil) -> GenerateParameters {
         GenerateParameters(
-            maxTokens: maxTokens,
+            maxTokens: maxTokensOverride ?? maxTokens,
             maxKVSize: maxKVSize,
             kvBits: kvBits,
-            temperature: temperature,
+            temperature: temperatureOverride ?? temperature,
             topP: topP,
             prefillStepSize: prefillStepSize
         )

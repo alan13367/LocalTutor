@@ -2,7 +2,6 @@
 //  ModelLabView.swift
 //  LocalTutor
 //
-//  Created by Codex on 28/05/2026.
 //
 
 import SwiftUI
@@ -327,17 +326,6 @@ private struct MetricRow: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .textSelection(.enabled)
-        }
-    }
-}
-
-private extension InferenceProfile {
-    var tierLabel: String {
-        switch tier {
-        case .eightGB:
-            "8GB baseline"
-        case .sixteenGB:
-            "16GB tier"
         }
     }
 }

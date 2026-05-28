@@ -2,7 +2,6 @@
 //  MemoryPreflightTests.swift
 //  LocalTutorTests
 //
-//  Created by Codex on 28/05/2026.
 //
 
 import Testing

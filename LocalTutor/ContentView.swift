@@ -10,7 +10,7 @@ import SwiftUI
 struct ContentView: View {
     var body: some View {
         StudyWorkspaceView()
-            .frame(minWidth: 960, minHeight: 660)
+            .frame(minWidth: 1040, minHeight: 720)
     }
 }
 
