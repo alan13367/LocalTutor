@@ -6,7 +6,35 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		0E703F79516D5BA0C062EC44 /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = 0FBE9E4823C1C8699F25EA96 /* MLXVLM */; };
+		679EB339C03BB5D60E5AB0C0 /* MemoryPreflightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E18B94AB0EFC8197AE0BDFF7 /* MemoryPreflightTests.swift */; };
+		6C5D8678F853DD78D6AA981E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		70BCCC648E62165587D1465F /* HuggingFace in Frameworks */ = {isa = PBXBuildFile; productRef = 1462228AFA92EF77605BE44D /* HuggingFace */; };
+		717A24CDB5BF14248879173C /* InferenceProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E030123AA43908C03B6E293 /* InferenceProfileTests.swift */; };
+		A03066B0FB5FBBDBF0C923CF /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = F26D2627FCE126D846B704E9 /* MLXLLM */; };
+		B64FE2EE5C6B00CD8FC76275 /* BenchmarkRecordTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E297C2228A7488B9848689E /* BenchmarkRecordTests.swift */; };
+		CABA406B6BCA80B097963C0B /* LocalModelRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69A0AC9384D73E9C72DEA760 /* LocalModelRunnerTests.swift */; };
+		E247F3A975ADFBDC51817D64 /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = 4E093CE2DC08B8C56FF3477A /* Tokenizers */; };
+		EF3F51A238872DDFF8A01429 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 2AF15760E0C35145F41C5A1F /* MLXLMCommon */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		E77A7942EEDC05C6194E7FC0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E74411E22FC83B2900FB6366 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E74411E92FC83B2900FB6366;
+			remoteInfo = LocalTutor;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		0E297C2228A7488B9848689E /* BenchmarkRecordTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BenchmarkRecordTests.swift; sourceTree = "<group>"; };
+		4E030123AA43908C03B6E293 /* InferenceProfileTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InferenceProfileTests.swift; sourceTree = "<group>"; };
+		69A0AC9384D73E9C72DEA760 /* LocalModelRunnerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LocalModelRunnerTests.swift; sourceTree = "<group>"; };
+		72375BAF9CA0C8D0980218C1 /* LocalTutorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LocalTutorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E18B94AB0EFC8197AE0BDFF7 /* MemoryPreflightTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryPreflightTests.swift; sourceTree = "<group>"; };
 		E74411EA2FC83B2900FB6366 /* LocalTutor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LocalTutor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -23,6 +51,19 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A03066B0FB5FBBDBF0C923CF /* MLXLLM in Frameworks */,
+				0E703F79516D5BA0C062EC44 /* MLXVLM in Frameworks */,
+				EF3F51A238872DDFF8A01429 /* MLXLMCommon in Frameworks */,
+				6C5D8678F853DD78D6AA981E /* (null) in Frameworks */,
+				70BCCC648E62165587D1465F /* HuggingFace in Frameworks */,
+				E247F3A975ADFBDC51817D64 /* Tokenizers in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F3A86733702E234616BE368F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -34,6 +75,7 @@
 			children = (
 				E74411EC2FC83B2900FB6366 /* LocalTutor */,
 				E74411EB2FC83B2900FB6366 /* Products */,
+				FB4DC736D7442F0D2B1F73B4 /* LocalTutorTests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -41,13 +83,43 @@
 			isa = PBXGroup;
 			children = (
 				E74411EA2FC83B2900FB6366 /* LocalTutor.app */,
+				72375BAF9CA0C8D0980218C1 /* LocalTutorTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		FB4DC736D7442F0D2B1F73B4 /* LocalTutorTests */ = {
+			isa = PBXGroup;
+			children = (
+				0E297C2228A7488B9848689E /* BenchmarkRecordTests.swift */,
+				4E030123AA43908C03B6E293 /* InferenceProfileTests.swift */,
+				69A0AC9384D73E9C72DEA760 /* LocalModelRunnerTests.swift */,
+				E18B94AB0EFC8197AE0BDFF7 /* MemoryPreflightTests.swift */,
+			);
+			path = LocalTutorTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		56CA1205B0649968655F57A5 /* LocalTutorTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3899E927740972EA882397EC /* Build configuration list for PBXNativeTarget "LocalTutorTests" */;
+			buildPhases = (
+				80C1B8E6028CE3B3264B3630 /* Sources */,
+				F3A86733702E234616BE368F /* Frameworks */,
+				BF1416F0D2266FC6DFEDC9E1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FF7ED84E037326296BF1924E /* PBXTargetDependency */,
+			);
+			name = LocalTutorTests;
+			productName = LocalTutorTests;
+			productReference = 72375BAF9CA0C8D0980218C1 /* LocalTutorTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		E74411E92FC83B2900FB6366 /* LocalTutor */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = E74411F72FC83B2A00FB6366 /* Build configuration list for PBXNativeTarget "LocalTutor" */;
@@ -65,6 +137,11 @@
 			);
 			name = LocalTutor;
 			packageProductDependencies = (
+				F26D2627FCE126D846B704E9 /* MLXLLM */,
+				0FBE9E4823C1C8699F25EA96 /* MLXVLM */,
+				2AF15760E0C35145F41C5A1F /* MLXLMCommon */,
+				1462228AFA92EF77605BE44D /* HuggingFace */,
+				4E093CE2DC08B8C56FF3477A /* Tokenizers */,
 			);
 			productName = LocalTutor;
 			productReference = E74411EA2FC83B2900FB6366 /* LocalTutor.app */;
@@ -94,17 +171,30 @@
 			);
 			mainGroup = E74411E12FC83B2900FB6366;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				0002DC0D93EB1C3203E16FD0 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
+				1C9786D491B0853593D12C25 /* XCRemoteSwiftPackageReference "swift-huggingface" */,
+				E0C3A8491DAEB49A54FCF20B /* XCRemoteSwiftPackageReference "swift-transformers" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E74411EB2FC83B2900FB6366 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				E74411E92FC83B2900FB6366 /* LocalTutor */,
+				56CA1205B0649968655F57A5 /* LocalTutorTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		BF1416F0D2266FC6DFEDC9E1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E74411E82FC83B2900FB6366 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -115,6 +205,17 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		80C1B8E6028CE3B3264B3630 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B64FE2EE5C6B00CD8FC76275 /* BenchmarkRecordTests.swift in Sources */,
+				717A24CDB5BF14248879173C /* InferenceProfileTests.swift in Sources */,
+				CABA406B6BCA80B097963C0B /* LocalModelRunnerTests.swift in Sources */,
+				679EB339C03BB5D60E5AB0C0 /* MemoryPreflightTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E74411E62FC83B2900FB6366 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -124,7 +225,50 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		FF7ED84E037326296BF1924E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = LocalTutor;
+			target = E74411E92FC83B2900FB6366 /* LocalTutor */;
+			targetProxy = E77A7942EEDC05C6194E7FC0 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		024F9DA0ACEFB4340BCFDBEA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = M77ZNJA6C8;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alan13367.LocalTutorTests;
+				PRODUCT_MODULE_NAME = LocalTutorTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LocalTutor.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LocalTutor";
+			};
+			name = Release;
+		};
+		195B2904F0E1907295ED6083 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = M77ZNJA6C8;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alan13367.LocalTutorTests;
+				PRODUCT_MODULE_NAME = LocalTutorTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LocalTutor.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LocalTutor";
+			};
+			name = Debug;
+		};
 		E74411F52FC83B2A00FB6366 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -250,6 +394,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LocalTutor/LocalTutor.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -270,10 +415,9 @@
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
@@ -282,6 +426,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LocalTutor/LocalTutor.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -302,16 +447,24 @@
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		3899E927740972EA882397EC /* Build configuration list for PBXNativeTarget "LocalTutorTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				024F9DA0ACEFB4340BCFDBEA /* Release */,
+				195B2904F0E1907295ED6083 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		E74411E52FC83B2900FB6366 /* Build configuration list for PBXProject "LocalTutor" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -331,6 +484,61 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		0002DC0D93EB1C3203E16FD0 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift-lm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.31.3;
+			};
+		};
+		1C9786D491B0853593D12C25 /* XCRemoteSwiftPackageReference "swift-huggingface" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-huggingface";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
+		E0C3A8491DAEB49A54FCF20B /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-transformers";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.3.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0FBE9E4823C1C8699F25EA96 /* MLXVLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0002DC0D93EB1C3203E16FD0 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
+			productName = MLXVLM;
+		};
+		1462228AFA92EF77605BE44D /* HuggingFace */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1C9786D491B0853593D12C25 /* XCRemoteSwiftPackageReference "swift-huggingface" */;
+			productName = HuggingFace;
+		};
+		2AF15760E0C35145F41C5A1F /* MLXLMCommon */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0002DC0D93EB1C3203E16FD0 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
+			productName = MLXLMCommon;
+		};
+		4E093CE2DC08B8C56FF3477A /* Tokenizers */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E0C3A8491DAEB49A54FCF20B /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Tokenizers;
+		};
+		F26D2627FCE126D846B704E9 /* MLXLLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0002DC0D93EB1C3203E16FD0 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
+			productName = MLXLLM;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = E74411E22FC83B2900FB6366 /* Project object */;
 }
