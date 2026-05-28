@@ -34,13 +34,14 @@ struct StudyWorkspaceView: View {
                 }
                 .help("Attach files")
 
-                Button(role: .destructive) {
-                    viewModel.clearTranscript()
+                Button {
+                    viewModel.newSession()
                 } label: {
                     Label("New session", systemImage: "square.and.pencil")
                 }
-                .disabled(viewModel.turns.isEmpty || viewModel.isRunning)
-                .help("Start a fresh session")
+                .disabled(viewModel.isGenerating)
+                .help("Start a new study session")
+                .keyboardShortcut("n", modifiers: .command)
 
                 Button {
                     isShowingSettings = true
@@ -121,31 +122,14 @@ private struct StudySidebar: View {
     var onAttach: () -> Void
     var onOpenSettings: () -> Void
 
+    @State private var renamingSessionID: UUID?
+    @State private var renameDraft = ""
+
     var body: some View {
         VStack(spacing: 0) {
-            List {
-                Section {
-                    HStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.accentColor.opacity(0.16))
-                                .frame(width: 30, height: 30)
-                            Image(systemName: "graduationcap.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Color.accentColor)
-                        }
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("Study Session")
-                                .font(.headline)
-                            Text(viewModel.activeProfile.name)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
+            sidebarHeader
 
+            List {
                 Section("Sources") {
                     if viewModel.sources.isEmpty {
                         Button(action: onAttach) {
@@ -184,25 +168,89 @@ private struct StudySidebar: View {
                     }
                 }
 
-                if !viewModel.turns.isEmpty {
-                    Section("This session") {
-                        ForEach(viewModel.turns) { turn in
-                            HStack(spacing: 8) {
-                                Image(systemName: turn.user.resourceKind.systemImage)
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 16)
-                                Text(turn.user.displayPrompt)
-                                    .lineLimit(1)
+                Section("History") {
+                    ForEach(viewModel.sessions) { session in
+                        SessionRow(
+                            session: session,
+                            isCurrent: session.id == viewModel.currentSessionID,
+                            isRunning: session.id == viewModel.runningSessionID
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            viewModel.selectSession(session.id)
+                        }
+                        .contextMenu {
+                            Button {
+                                renamingSessionID = session.id
+                                renameDraft = session.derivedTitle
+                            } label: {
+                                Label("Rename", systemImage: "pencil")
                             }
+                            Button(role: .destructive) {
+                                viewModel.deleteSession(session.id)
+                            } label: {
+                                Label("Delete session", systemImage: "trash")
+                            }
+                            .disabled(session.id == viewModel.runningSessionID)
                         }
                     }
                 }
             }
             .listStyle(.sidebar)
+            .alert("Rename Session", isPresented: renameAlertIsPresented) {
+                TextField("Name", text: $renameDraft)
+                Button("Save") {
+                    if let id = renamingSessionID {
+                        viewModel.renameSession(id, to: renameDraft)
+                    }
+                    renamingSessionID = nil
+                }
+                .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Cancel", role: .cancel) {
+                    renamingSessionID = nil
+                }
+            } message: {
+                Text("Choose a name for this study session.")
+            }
 
             Divider()
             modelFooter
         }
+    }
+
+    private var sidebarHeader: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.16))
+                    .frame(width: 30, height: 30)
+                Image(systemName: "graduationcap.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                Text("LocalTutor")
+                    .font(.headline)
+                Text("\(viewModel.sessions.count) session\(viewModel.sessions.count == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button {
+                viewModel.newSession()
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(viewModel.isGenerating ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+            .disabled(viewModel.isGenerating)
+            .help("New session (⌘N)")
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
     }
 
     private var modelFooter: some View {
@@ -250,6 +298,46 @@ private struct StudySidebar: View {
         .help("Open settings and choose a model")
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
+    }
+
+    private var renameAlertIsPresented: Binding<Bool> {
+        Binding(
+            get: { renamingSessionID != nil },
+            set: { if !$0 { renamingSessionID = nil } }
+        )
+    }
+}
+
+// MARK: - Session row
+
+private struct SessionRow: View {
+    let session: StudySession
+    let isCurrent: Bool
+    let isRunning: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: isCurrent ? "bubble.left.fill" : "bubble.left")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isCurrent ? Color.accentColor : .secondary)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(session.derivedTitle)
+                    .font(.callout.weight(isCurrent ? .semibold : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(session.subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if isRunning {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 

@@ -4,6 +4,7 @@
 //
 //
 
+import Foundation
 import Testing
 @testable import LocalTutor
 
@@ -26,5 +27,40 @@ struct LocalModelRunnerTests {
         } catch {
             Issue.record("Unexpected error: \(error)")
         }
+    }
+
+    @Test
+    func downloadProgressTrackerSuppressesAlreadyCachedCompletion() {
+        let tracker = DownloadProgressTracker()
+        let progress = Progress(totalUnitCount: 100)
+        progress.completedUnitCount = 100
+
+        #expect(tracker.update(progress) == nil)
+        #expect(tracker.downloadSeconds == 0)
+    }
+
+    @Test
+    func downloadProgressTrackerSuppressesCachedZeroThenCompletion() {
+        let tracker = DownloadProgressTracker()
+        let progress = Progress(totalUnitCount: 100)
+
+        progress.completedUnitCount = 0
+        #expect(tracker.update(progress) == nil)
+
+        progress.completedUnitCount = 100
+        #expect(tracker.update(progress) == nil)
+        #expect(tracker.downloadSeconds == 0)
+    }
+
+    @Test
+    func downloadProgressTrackerReportsRealWorkBeforeCompletion() {
+        let tracker = DownloadProgressTracker()
+        let progress = Progress(totalUnitCount: 100)
+        progress.completedUnitCount = 20
+
+        let update = tracker.update(progress)
+
+        #expect(update?.fraction == 0.2)
+        #expect(update?.message == "Downloading 20%")
     }
 }

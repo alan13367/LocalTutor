@@ -16,31 +16,26 @@ final class DownloadProgressTracker: @unchecked Sendable {
     private var firstProgressDate: Date?
     private var latestProgressDate: Date?
     private var latestFraction: Double?
+    private var hasReportedDownload = false
 
-    func start(message: String) -> DownloadProgressUpdate {
+    func update(_ progress: Progress) -> DownloadProgressUpdate? {
         lock.lock()
         defer { lock.unlock() }
 
         let now = Date()
-        if firstProgressDate == nil {
-            firstProgressDate = now
-        }
-        latestProgressDate = now
-
-        return DownloadProgressUpdate(fraction: nil, message: message)
-    }
-
-    func update(_ progress: Progress) -> DownloadProgressUpdate {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let now = Date()
-        if firstProgressDate == nil {
-            firstProgressDate = now
-        }
-        latestProgressDate = now
-
         let fraction = determinateFraction(for: progress)
+
+        if !hasReportedDownload {
+            if let fraction, fraction <= 0 || fraction >= 1 {
+                return nil
+            }
+
+            hasReportedDownload = true
+            firstProgressDate = now
+        }
+
+        latestProgressDate = now
+
         if let fraction {
             latestFraction = max(latestFraction ?? 0, fraction)
         }

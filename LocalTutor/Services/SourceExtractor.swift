@@ -43,7 +43,12 @@ enum SourceExtractor {
         return await withTaskGroup(of: ExtractedSource.self) { group in
             for source in textSources {
                 group.addTask {
-                    await extractOne(source)
+                    if let cached = await SourceExtractionCache.shared.cached(for: source) {
+                        return cached
+                    }
+                    let extracted = await extractOne(source)
+                    await SourceExtractionCache.shared.store(extracted, for: source)
+                    return extracted
                 }
             }
             var results: [ExtractedSource] = []
@@ -57,13 +62,14 @@ enum SourceExtractor {
     }
 
     private static func extractOne(_ source: StudySource) async -> ExtractedSource {
-        let granted = source.url.startAccessingSecurityScopedResource()
+        let url = source.accessibleURL
+        let granted = url.startAccessingSecurityScopedResource()
         defer {
-            if granted { source.url.stopAccessingSecurityScopedResource() }
+            if granted { url.stopAccessingSecurityScopedResource() }
         }
 
         do {
-            let raw = try readText(at: source.url, kind: source.kind, fileExtension: source.fileExtension)
+            let raw = try readText(at: url, kind: source.kind, fileExtension: source.fileExtension)
             let cleaned = clean(raw)
             let trimmed = String(cleaned.prefix(perSourceCharacterLimit))
             return ExtractedSource(source: source, text: trimmed, failureReason: nil)
@@ -170,6 +176,46 @@ enum SourceExtractor {
             options: .regularExpression
         )
         return collapsed.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Caches extracted text so refinements, regenerations, and follow-up turns in a
+/// session don't re-parse the same PDF/Word files. Keyed by file URL + the file's
+/// modification date so edits on disk invalidate stale text.
+actor SourceExtractionCache {
+    static let shared = SourceExtractionCache()
+
+    private struct Entry {
+        var modified: Date?
+        var extracted: ExtractedSource
+    }
+
+    private var store: [String: Entry] = [:]
+
+    func cached(for source: StudySource) -> ExtractedSource? {
+        guard let entry = store[key(for: source)] else { return nil }
+        if entry.modified != currentModificationDate(for: source) {
+            return nil
+        }
+        return entry.extracted
+    }
+
+    func store(_ extracted: ExtractedSource, for source: StudySource) {
+        store[key(for: source)] = Entry(
+            modified: currentModificationDate(for: source),
+            extracted: extracted
+        )
+    }
+
+    private func key(for source: StudySource) -> String {
+        source.accessibleURL.absoluteString
+    }
+
+    private func currentModificationDate(for source: StudySource) -> Date? {
+        let url = source.accessibleURL
+        let granted = url.startAccessingSecurityScopedResource()
+        defer { if granted { url.stopAccessingSecurityScopedResource() } }
+        return (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
     }
 }
 

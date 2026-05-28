@@ -23,4 +23,11 @@ struct InferenceProfileTests {
             16.gibibytes
         ])
     }
+
+    @Test
+    func studyCatalogContainsOnlyReliableStructuredOutputProfiles() {
+        let profiles = InferenceProfile.studyCatalog
+
+        #expect(profiles.map(\.id) == ["gemma4E2B", "gemma4E4B", "qwen3VL4B"])
+    }
 }

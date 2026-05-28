@@ -158,7 +158,7 @@ final class ModelLabViewModel: ObservableObject {
         switch event {
         case .stage(let message):
             statusMessage = message
-            if Self.stageEndsDownload(message) {
+            if LocalModelRunnerStage.endsDownloadPhase(message) {
                 isDownloading = false
                 downloadProgress = nil
                 downloadPhaseHasEnded = true
@@ -211,10 +211,4 @@ final class ModelLabViewModel: ObservableObject {
         }
     }
 
-    private static func stageEndsDownload(_ message: String) -> Bool {
-        message.hasPrefix("Loaded")
-            || message.hasPrefix("Using loaded")
-            || message == "Preparing prompt"
-            || message == "Generating"
-    }
 }

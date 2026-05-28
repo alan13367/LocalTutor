@@ -7,7 +7,7 @@
 import Foundation
 import UniformTypeIdentifiers
 
-enum StudyResourceKind: String, CaseIterable, Identifiable {
+enum StudyResourceKind: String, CaseIterable, Identifiable, Codable {
     case summary
     case beginnerExplanation
     case flashcards
@@ -82,7 +82,7 @@ enum StudyResourceKind: String, CaseIterable, Identifiable {
     }
 }
 
-enum StudySourceKind: String {
+enum StudySourceKind: String, Codable {
     case pdf
     case image
     case document
@@ -130,12 +130,14 @@ enum StudySourceKind: String {
     }
 }
 
-struct StudySource: Identifiable, Equatable, Hashable {
-    let id = UUID()
+struct StudySource: Identifiable, Equatable, Hashable, Codable {
+    var id = UUID()
     var url: URL
     var displayName: String
     var fileExtension: String
     var kind: StudySourceKind
+    /// Security-scoped bookmark so the file stays readable after the app relaunches.
+    var bookmarkData: Data?
 
     var isImage: Bool {
         kind == .image
@@ -146,6 +148,27 @@ struct StudySource: Identifiable, Equatable, Hashable {
         displayName = url.lastPathComponent
         fileExtension = url.pathExtension.lowercased()
         kind = StudySource.kind(for: url)
+        bookmarkData = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+    }
+
+    /// Resolves the bookmark to a current security-scoped URL when possible, so
+    /// persisted sessions can re-read their files. Falls back to the stored URL.
+    var accessibleURL: URL {
+        guard let bookmarkData else { return url }
+        var isStale = false
+        if let resolved = try? URL(
+            resolvingBookmarkData: bookmarkData,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) {
+            return resolved
+        }
+        return url
     }
 
     func hash(into hasher: inout Hasher) {
@@ -193,7 +216,7 @@ struct StudySource: Identifiable, Equatable, Hashable {
     }
 }
 
-enum StudyTurnStatus: Equatable {
+enum StudyTurnStatus: Equatable, Codable {
     case streaming
     case done
     case cancelled
@@ -205,10 +228,46 @@ enum StudyTurnStatus: Equatable {
         default: true
         }
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, message
+    }
+
+    private enum Kind: String, Codable {
+        case streaming, done, cancelled, failed
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .streaming:
+            try container.encode(Kind.streaming, forKey: .kind)
+        case .done:
+            try container.encode(Kind.done, forKey: .kind)
+        case .cancelled:
+            try container.encode(Kind.cancelled, forKey: .kind)
+        case .failed(let message):
+            try container.encode(Kind.failed, forKey: .kind)
+            try container.encode(message, forKey: .message)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(Kind.self, forKey: .kind)
+        switch kind {
+        case .streaming: self = .streaming
+        case .done: self = .done
+        case .cancelled: self = .cancelled
+        case .failed:
+            let message = (try? container.decode(String.self, forKey: .message)) ?? "The run failed."
+            self = .failed(message)
+        }
+    }
 }
 
-struct StudyTurnUser: Identifiable, Equatable {
-    let id = UUID()
+struct StudyTurnUser: Identifiable, Equatable, Codable {
+    var id = UUID()
     var focus: String
     var resourceKind: StudyResourceKind
     var sources: [StudySource]
@@ -220,7 +279,7 @@ struct StudyTurnUser: Identifiable, Equatable {
     }
 }
 
-struct StudyTurnAssistant: Equatable {
+struct StudyTurnAssistant: Equatable, Codable {
     var markdown: String = ""
     var status: StudyTurnStatus = .streaming
     var statusMessage: String = "Starting"
@@ -231,10 +290,81 @@ struct StudyTurnAssistant: Equatable {
     var payload: StudyArtifactPayload?
 }
 
-struct StudyTurn: Identifiable, Equatable {
-    let id = UUID()
+struct StudyTurn: Identifiable, Equatable, Codable {
+    var id = UUID()
     var user: StudyTurnUser
     var assistant: StudyTurnAssistant = StudyTurnAssistant()
+}
+
+/// A persisted study session: its own sources, transcript, and default resource kind.
+struct StudySession: Identifiable, Equatable, Codable {
+    var id = UUID()
+    var title: String
+    /// When true, the history list shows `title` instead of auto-deriving from the first turn.
+    var titleIsCustom: Bool
+    var createdAt: Date
+    var updatedAt: Date
+    var sources: [StudySource]
+    var turns: [StudyTurn]
+    var selectedResource: StudyResourceKind
+
+    init(
+        id: UUID = UUID(),
+        title: String = "New session",
+        titleIsCustom: Bool = false,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        sources: [StudySource] = [],
+        turns: [StudyTurn] = [],
+        selectedResource: StudyResourceKind = .summary
+    ) {
+        self.id = id
+        self.title = title
+        self.titleIsCustom = titleIsCustom
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.sources = sources
+        self.turns = turns
+        self.selectedResource = selectedResource
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        titleIsCustom = try container.decodeIfPresent(Bool.self, forKey: .titleIsCustom) ?? false
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        sources = try container.decode([StudySource].self, forKey: .sources)
+        turns = try container.decode([StudyTurn].self, forKey: .turns)
+        selectedResource = try container.decode(StudyResourceKind.self, forKey: .selectedResource)
+    }
+
+    var isEmpty: Bool {
+        turns.isEmpty && sources.isEmpty
+    }
+
+    /// A short, human title for the history list (custom name or first-turn prompt).
+    var derivedTitle: String {
+        if titleIsCustom {
+            return title
+        }
+        if let first = turns.first {
+            let prompt = first.user.displayPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !prompt.isEmpty {
+                return String(prompt.prefix(60))
+            }
+        }
+        return title
+    }
+
+    var subtitle: String {
+        let count = turns.count
+        if count == 0 {
+            return sources.isEmpty ? "Empty" : "\(sources.count) source\(sources.count == 1 ? "" : "s")"
+        }
+        return "\(count) turn\(count == 1 ? "" : "s")"
+    }
 }
 
 struct RefinementSuggestion: Identifiable, Equatable {

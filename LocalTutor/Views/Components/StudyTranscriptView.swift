@@ -48,14 +48,17 @@ struct StudyTranscriptView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
             .onChange(of: viewModel.turns.last?.assistant.markdown) { _, _ in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
+                // Streaming updates arrive coalesced (~25 fps); scroll without an
+                // animation so we don't queue an animation per frame and jank.
+                proxy.scrollTo("bottom", anchor: .bottom)
             }
             .onChange(of: viewModel.turns.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
+            }
+            .onChange(of: viewModel.currentSessionID) { _, _ in
+                proxy.scrollTo("bottom", anchor: .bottom)
             }
         }
     }

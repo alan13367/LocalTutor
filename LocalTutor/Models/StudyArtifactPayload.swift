@@ -8,9 +8,39 @@
 
 import Foundation
 
-enum StudyArtifactPayload: Equatable {
+enum StudyArtifactPayload: Equatable, Codable {
     case quiz(QuizArtifact)
     case flashcards(FlashcardDeck)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, quiz, flashcards
+    }
+
+    private enum Kind: String, Codable {
+        case quiz, flashcards
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .quiz(let artifact):
+            try container.encode(Kind.quiz, forKey: .kind)
+            try container.encode(artifact, forKey: .quiz)
+        case .flashcards(let deck):
+            try container.encode(Kind.flashcards, forKey: .kind)
+            try container.encode(deck, forKey: .flashcards)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .quiz:
+            self = .quiz(try container.decode(QuizArtifact.self, forKey: .quiz))
+        case .flashcards:
+            self = .flashcards(try container.decode(FlashcardDeck.self, forKey: .flashcards))
+        }
+    }
 }
 
 // MARK: - Quiz

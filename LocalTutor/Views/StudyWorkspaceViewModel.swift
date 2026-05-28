@@ -11,19 +11,135 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class StudyWorkspaceViewModel: ObservableObject {
-    @Published var sources: [StudySource] = []
-    @Published var selectedResource: StudyResourceKind = .summary
+    // Persisted study-session history. Each session owns its own sources + turns.
+    @Published private(set) var sessions: [StudySession] = []
+    @Published var currentSessionID: UUID = UUID()
+
+    // Ephemeral, not persisted with the session.
     @Published var composerText: String = ""
-    @Published var turns: [StudyTurn] = []
     @Published var globalError: String?
-    @AppStorage("selectedProfileID") private var storedProfileID: String = ""
+
+    /// The session that owns the in-flight generation, if any.
+    @Published private(set) var runningSessionID: UUID?
+
+    @AppStorage(AppStorageKeys.selectedProfileID) private var storedProfileID: String = ""
 
     private let runner: LocalModelRunner
+    private let store = SessionStore()
     private var runTask: Task<Void, Never>?
+    private var saveTask: Task<Void, Never>?
+    private var hasLoaded = false
+
+    // Streaming coalescing: buffer tokens and flush to the UI on a frame cadence
+    // instead of mutating published state on every single token.
+    private var pendingChunks: String = ""
+    private var flushScheduled = false
 
     init(runner: LocalModelRunner = LocalModelRunner()) {
         self.runner = runner
+        bootstrap()
     }
+
+    private func bootstrap() {
+        var loaded = SessionStore.loadSync()
+        if loaded.isEmpty {
+            loaded = [StudySession()]
+        } else {
+            loaded.sort { $0.updatedAt > $1.updatedAt }
+        }
+        sessions = loaded
+        currentSessionID = loaded[0].id
+        hasLoaded = true
+    }
+
+    // MARK: - Current session access
+
+    private var currentIndex: Int? {
+        sessions.firstIndex(where: { $0.id == currentSessionID })
+    }
+
+    var currentSession: StudySession {
+        get {
+            if let index = currentIndex {
+                return sessions[index]
+            }
+            return sessions.first ?? StudySession()
+        }
+        set {
+            guard let index = currentIndex else { return }
+            sessions[index] = newValue
+        }
+    }
+
+    var sources: [StudySource] {
+        get { currentSession.sources }
+        set {
+            currentSession.sources = newValue
+            touchCurrent()
+        }
+    }
+
+    var turns: [StudyTurn] {
+        get { currentSession.turns }
+        set {
+            currentSession.turns = newValue
+            touchCurrent()
+        }
+    }
+
+    var selectedResource: StudyResourceKind {
+        get { currentSession.selectedResource }
+        set {
+            currentSession.selectedResource = newValue
+            touchCurrent()
+        }
+    }
+
+    // MARK: - Session management
+
+    func newSession() {
+        guard runningSessionID == nil else { return }
+        composerText = ""
+        // Reuse an existing empty session instead of stacking up blank ones.
+        if let empty = sessions.first(where: { $0.isEmpty }) {
+            currentSessionID = empty.id
+        } else {
+            let session = StudySession()
+            sessions.insert(session, at: 0)
+            currentSessionID = session.id
+        }
+        scheduleSave()
+    }
+
+    func selectSession(_ id: UUID) {
+        guard id != currentSessionID, sessions.contains(where: { $0.id == id }) else { return }
+        composerText = ""
+        globalError = nil
+        currentSessionID = id
+    }
+
+    func deleteSession(_ id: UUID) {
+        guard runningSessionID != id else { return }
+        sessions.removeAll { $0.id == id }
+        if sessions.isEmpty {
+            sessions = [StudySession()]
+        }
+        if !sessions.contains(where: { $0.id == currentSessionID }) {
+            currentSessionID = sessions[0].id
+        }
+        scheduleSave()
+    }
+
+    func renameSession(_ id: UUID, to title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[index].title = trimmed
+        sessions[index].titleIsCustom = true
+        sessions[index].updatedAt = Date()
+        scheduleSave()
+    }
+
+    // MARK: - Profiles
 
     var activeProfile: InferenceProfile {
         if let profile = InferenceProfile.profile(withID: storedProfileID),
@@ -44,16 +160,23 @@ final class StudyWorkspaceViewModel: ObservableObject {
     }
 
     var selectedImageURL: URL? {
-        sources.first(where: \.isImage)?.url
+        sources.first(where: \.isImage)?.accessibleURL
     }
 
+    // MARK: - Run state
+
+    /// True when the *current* session is the one actively generating.
     var isRunning: Bool {
-        if case .streaming = turns.last?.assistant.status { return true }
-        return false
+        runningSessionID == currentSessionID && runningSessionID != nil
+    }
+
+    /// True when any session is generating (the runner is single-flight).
+    var isGenerating: Bool {
+        runningSessionID != nil
     }
 
     var canSend: Bool {
-        guard !isRunning else { return false }
+        guard runningSessionID == nil else { return false }
         let hasText = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return hasText || !sources.isEmpty
     }
@@ -150,7 +273,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
     }
 
     func refine(with suggestion: RefinementSuggestion) {
-        guard !isRunning else { return }
+        guard runningSessionID == nil else { return }
         let kind = suggestion.newKind ?? turns.last?.user.resourceKind ?? selectedResource
         if let newKind = suggestion.newKind {
             selectedResource = newKind
@@ -165,27 +288,23 @@ final class StudyWorkspaceViewModel: ObservableObject {
     }
 
     func regenerate(turn: StudyTurn) {
-        guard !isRunning else { return }
-        var user = turn.user
-        user = StudyTurnUser(
-            focus: user.focus,
-            resourceKind: user.resourceKind,
-            sources: sources.isEmpty ? user.sources : sources,
-            isRefinement: user.isRefinement
+        guard runningSessionID == nil else { return }
+        let user = StudyTurnUser(
+            focus: turn.user.focus,
+            resourceKind: turn.user.resourceKind,
+            sources: sources.isEmpty ? turn.user.sources : sources,
+            isRefinement: turn.user.isRefinement
         )
         startTurn(user: user)
     }
 
-    func clearTranscript() {
-        guard !isRunning else { return }
-        turns.removeAll()
-    }
-
     func cancel() {
-        guard isRunning else { return }
+        guard runningSessionID != nil else { return }
         runTask?.cancel()
-        if let idx = turns.indices.last {
-            turns[idx].assistant.statusMessage = "Cancelling"
+        if let runningSessionID,
+           let sIdx = sessions.firstIndex(where: { $0.id == runningSessionID }),
+           let last = sessions[sIdx].turns.indices.last {
+            sessions[sIdx].turns[last].assistant.statusMessage = "Cancelling"
         }
     }
 
@@ -209,8 +328,13 @@ final class StudyWorkspaceViewModel: ObservableObject {
         turn.assistant.statusMessage = user.sources.contains(where: { !$0.isImage }) ? "Reading sources" : "Starting \(profile.name)"
         turns.append(turn)
         let turnID = turn.id
+        let sessionID = currentSessionID
         let history = Array(turns.dropLast())
-        let imageURL = user.sources.first(where: \.isImage)?.url ?? selectedImageURL
+        let imageURL = user.sources.first(where: \.isImage)?.accessibleURL ?? selectedImageURL
+
+        pendingChunks = ""
+        flushScheduled = false
+        runningSessionID = sessionID
 
         runTask = Task { [weak self] in
             guard let self else { return }
@@ -219,7 +343,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
                 self.updateStatusIfStreaming(turnID: turnID, message: "Starting \(profile.name)")
             }
 
-            let prompt = self.makePrompt(for: user, history: history, extracted: extracted)
+            let prompt = StudyPromptBuilder.prompt(for: user, history: history, extracted: extracted)
 
             let maxTokens: Int? = user.resourceKind.isInteractive ? 2048 : nil
             let temperature: Float? = user.resourceKind.isInteractive ? 0.1 : nil
@@ -245,29 +369,67 @@ final class StudyWorkspaceViewModel: ObservableObject {
         }
     }
 
+    /// Mutates a turn in whichever session owns it (so background runs keep
+    /// updating their origin session even if the user switches away).
+    private func updateTurn(_ turnID: UUID, _ body: (inout StudyTurn) -> Void) {
+        // No scheduleSave here: this runs up to ~25x/sec while streaming. Persistence
+        // is handled at terminal points (finish/fail) and on structural changes.
+        for sIdx in sessions.indices {
+            if let tIdx = sessions[sIdx].turns.firstIndex(where: { $0.id == turnID }) {
+                body(&sessions[sIdx].turns[tIdx])
+                sessions[sIdx].updatedAt = Date()
+                return
+            }
+        }
+    }
+
     private func updateStatusIfStreaming(turnID: UUID, message: String) {
-        guard let idx = turns.firstIndex(where: { $0.id == turnID }),
-              turns[idx].assistant.status == .streaming else { return }
-        turns[idx].assistant.statusMessage = message
+        updateTurn(turnID) { turn in
+            guard turn.assistant.status == .streaming else { return }
+            turn.assistant.statusMessage = message
+        }
     }
 
     private func handle(_ event: LocalModelRunnerEvent, turnID: UUID, kind: StudyResourceKind) {
-        guard let idx = turns.firstIndex(where: { $0.id == turnID }) else { return }
         switch event {
         case .stage(let message):
-            turns[idx].assistant.statusMessage = message
-            if Self.stageEndsDownload(message) {
-                turns[idx].assistant.isDownloading = false
-                turns[idx].assistant.downloadProgress = nil
+            updateTurn(turnID) { turn in
+                turn.assistant.statusMessage = message
+                if LocalModelRunnerStage.endsDownloadPhase(message) {
+                    turn.assistant.isDownloading = false
+                    turn.assistant.downloadProgress = nil
+                }
             }
         case .downloadProgress(let update):
-            turns[idx].assistant.isDownloading = true
-            turns[idx].assistant.downloadProgress = update.fraction
-            turns[idx].assistant.statusMessage = update.message
+            updateTurn(turnID) { turn in
+                turn.assistant.isDownloading = true
+                turn.assistant.downloadProgress = update.fraction
+                turn.assistant.statusMessage = update.message
+            }
         case .outputChunk(let chunk):
-            turns[idx].assistant.markdown += chunk
+            pendingChunks += chunk
+            scheduleFlush(turnID: turnID, kind: kind)
+        }
+    }
+
+    private func scheduleFlush(turnID: UUID, kind: StudyResourceKind) {
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 40_000_000) // ~25 fps
+            self?.flushPending(turnID: turnID, kind: kind)
+        }
+    }
+
+    private func flushPending(turnID: UUID, kind: StudyResourceKind) {
+        flushScheduled = false
+        guard !pendingChunks.isEmpty else { return }
+        let chunk = pendingChunks
+        pendingChunks = ""
+        updateTurn(turnID) { turn in
+            turn.assistant.markdown += chunk
             if kind.isInteractive {
-                turns[idx].assistant.statusMessage = Self.interactiveProgressMessage(for: kind, raw: turns[idx].assistant.markdown)
+                turn.assistant.statusMessage = Self.interactiveProgressMessage(for: kind, raw: turn.assistant.markdown)
             }
         }
     }
@@ -286,148 +448,84 @@ final class StudyWorkspaceViewModel: ObservableObject {
     }
 
     private func finish(record: BenchmarkRecord, turnID: UUID) {
-        guard let idx = turns.firstIndex(where: { $0.id == turnID }) else { return }
-        if turns[idx].assistant.markdown.isEmpty {
-            turns[idx].assistant.markdown = record.output
-        }
-        turns[idx].assistant.finishedAt = Date()
-        turns[idx].assistant.isDownloading = false
-        turns[idx].assistant.downloadProgress = nil
+        // Drain any buffered tokens before settling the turn.
+        let pending = pendingChunks
+        pendingChunks = ""
+        flushScheduled = false
+        runningSessionID = nil
 
-        let kind = turns[idx].user.resourceKind
-        if kind.isInteractive {
-            turns[idx].assistant.payload = StudyArtifactParser.parse(turns[idx].assistant.markdown, kind: kind)
-        }
+        updateTurn(turnID) { turn in
+            if !pending.isEmpty {
+                turn.assistant.markdown += pending
+            }
+            if turn.assistant.markdown.isEmpty {
+                turn.assistant.markdown = record.output
+            }
+            turn.assistant.finishedAt = Date()
+            turn.assistant.isDownloading = false
+            turn.assistant.downloadProgress = nil
 
-        switch record.status {
-        case .success:
-            turns[idx].assistant.status = .done
-            turns[idx].assistant.statusMessage = kind.isInteractive
-                ? (turns[idx].assistant.payload == nil ? "Could not parse response" : "Ready")
-                : "Ready"
-        case .cancelled:
-            turns[idx].assistant.status = .cancelled
-            turns[idx].assistant.statusMessage = "Cancelled"
-        case .failed:
-            turns[idx].assistant.status = .failed(record.errorMessage ?? "The local model run failed.")
-            turns[idx].assistant.statusMessage = "Failed"
-        case .skipped:
-            turns[idx].assistant.status = .failed(record.errorMessage ?? "Skipped.")
-            turns[idx].assistant.statusMessage = "Skipped"
+            let kind = turn.user.resourceKind
+            if kind.isInteractive {
+                turn.assistant.payload = StudyArtifactParser.parse(turn.assistant.markdown, kind: kind)
+            }
+
+            switch record.status {
+            case .success:
+                turn.assistant.status = .done
+                turn.assistant.statusMessage = kind.isInteractive
+                    ? (turn.assistant.payload == nil ? "Could not parse response" : "Ready")
+                    : "Ready"
+            case .cancelled:
+                turn.assistant.status = .cancelled
+                turn.assistant.statusMessage = "Cancelled"
+            case .failed:
+                turn.assistant.status = .failed(record.errorMessage ?? "The local model run failed.")
+                turn.assistant.statusMessage = "Failed"
+            case .skipped:
+                turn.assistant.status = .failed(record.errorMessage ?? "Skipped.")
+                turn.assistant.statusMessage = "Skipped"
+            }
         }
+        scheduleSave()
     }
 
     private func fail(turnID: UUID, message: String) {
-        guard let idx = turns.firstIndex(where: { $0.id == turnID }) else { return }
-        turns[idx].assistant.status = .failed(message)
-        turns[idx].assistant.statusMessage = "Failed"
-        turns[idx].assistant.finishedAt = Date()
-        turns[idx].assistant.isDownloading = false
-        turns[idx].assistant.downloadProgress = nil
+        pendingChunks = ""
+        flushScheduled = false
+        runningSessionID = nil
+        updateTurn(turnID) { turn in
+            turn.assistant.status = .failed(message)
+            turn.assistant.statusMessage = "Failed"
+            turn.assistant.finishedAt = Date()
+            turn.assistant.isDownloading = false
+            turn.assistant.downloadProgress = nil
+        }
+        scheduleSave()
     }
 
-    private static func stageEndsDownload(_ message: String) -> Bool {
-        message.hasPrefix("Loaded")
-            || message.hasPrefix("Using loaded")
-            || message == "Preparing prompt"
-            || message == "Generating"
-    }
+    // MARK: - Persistence
 
-    private func makePrompt(for user: StudyTurnUser, history: [StudyTurn], extracted: [ExtractedSource]) -> String {
-        let trimmed = user.focus.trimmingCharacters(in: .whitespacesAndNewlines)
-        let goal = trimmed.isEmpty ? "Help me study the attached sources." : trimmed
-        let sourceList = user.sources.isEmpty
-            ? "No files were attached."
-            : user.sources.map { "- \($0.displayName) (\($0.kind.label))" }.joined(separator: "\n")
-
-        var transcript = ""
-        if !history.isEmpty {
-            let recent = history.suffix(4)
-            transcript = "\nPrevious turns (most recent last):\n" + recent.map { turn in
-                let assistantText = turn.assistant.markdown.isEmpty ? "(no output)" : turn.assistant.markdown
-                return """
-                Student: \(turn.user.displayPrompt)
-                Tutor: \(assistantText)
-                """
-            }.joined(separator: "\n---\n") + "\n"
-        }
-
-        let sourceContents = Self.renderSourceContents(extracted, hasImage: user.sources.contains(where: \.isImage))
-
-        let formatBlock: String
-        if let schema = user.resourceKind.jsonSchemaInstruction {
-            formatBlock = """
-            Output format (STRICT):
-            \(schema)
-            """
-        } else {
-            formatBlock = "Format the answer for studying with short markdown headings, concrete bullets, and **bold** for key terms. No filler."
-        }
-
-        return """
-        You are LocalTutor, a private local study tutor running on the student's Mac.
-
-        Resource to create:
-        \(user.resourceKind.promptInstruction)
-        \(transcript)
-        Student goal:
-        \(goal)
-
-        Source files:
-        \(sourceList)
-
-        \(sourceContents)
-
-        Base your answer strictly on the provided source contents and any attached image. If the sources do not cover something, say so briefly rather than guessing. Never ask the student to upload or paste a file that already appears above — it has already been provided.
-
-        \(formatBlock)
-        """
-    }
-
-    private static func renderSourceContents(_ extracted: [ExtractedSource], hasImage: Bool) -> String {
-        if extracted.isEmpty {
-            return hasImage
-                ? "Source contents:\nAn image is attached as a separate input — analyze it directly."
-                : "Source contents:\nNo text could be extracted from the attached files."
-        }
-
-        var budget = SourceExtractor.totalCharacterBudget
-        var sections: [String] = []
-        var truncatedAny = false
-
-        for item in extracted {
-            if let reason = item.failureReason, !item.hasContent {
-                sections.append("""
-                === \(item.source.displayName) ===
-                (Could not read: \(reason))
-                """)
-                continue
+    private func touchCurrent() {
+        guard hasLoaded, let index = currentIndex else { return }
+        sessions[index].updatedAt = Date()
+        if !sessions[index].titleIsCustom, sessions[index].title == "New session" {
+            let derived = sessions[index].derivedTitle
+            if derived != "New session" {
+                sessions[index].title = derived
             }
-
-            let allowed = min(item.text.count, budget)
-            let snippet = allowed > 0 ? String(item.text.prefix(allowed)) : ""
-            budget -= allowed
-
-            var section = """
-            === \(item.source.displayName) ===
-            \(snippet)
-            """
-            if allowed < item.text.count {
-                section += "\n…[truncated — only the first portion fits the context window]"
-                truncatedAny = true
-            }
-            sections.append(section)
-            if budget <= 0 { break }
         }
+        scheduleSave()
+    }
 
-        let truncationNote = truncatedAny
-            ? "\nNote: Some excerpts above are truncated to fit the local model's context window. Base your answer on what is present and say 'the excerpt does not cover this' for anything that isn't.\n"
-            : ""
-
-        return """
-        Source contents (verbatim excerpts the student attached):
-        \(sections.joined(separator: "\n\n"))
-        \(truncationNote)
-        """
+    private func scheduleSave() {
+        guard hasLoaded else { return }
+        saveTask?.cancel()
+        let snapshot = sessions
+        saveTask = Task { [store] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            await store.save(snapshot)
+        }
     }
 }

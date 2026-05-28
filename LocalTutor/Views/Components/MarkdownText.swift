@@ -56,197 +56,6 @@ struct MarkdownText: View {
     }
 }
 
-// MARK: - Block model
-
-enum MarkdownBlock: Identifiable, Equatable {
-    case heading(level: Int, text: String, id: UUID = UUID())
-    case paragraph(AttributedString, id: UUID = UUID())
-    case bulletList(items: [AttributedString], id: UUID = UUID())
-    case numberedList(items: [AttributedString], id: UUID = UUID())
-    case codeBlock(language: String?, code: String, id: UUID = UUID())
-    case quote(AttributedString, id: UUID = UUID())
-    case divider(id: UUID = UUID())
-
-    var id: UUID {
-        switch self {
-        case .heading(_, _, let id),
-             .paragraph(_, let id),
-             .bulletList(_, let id),
-             .numberedList(_, let id),
-             .codeBlock(_, _, let id),
-             .quote(_, let id),
-             .divider(let id):
-            return id
-        }
-    }
-}
-
-// MARK: - Parser
-
-enum MarkdownParser {
-    static func parse(_ raw: String) -> [MarkdownBlock] {
-        guard !raw.isEmpty else { return [] }
-        var blocks: [MarkdownBlock] = []
-        let lines = raw.components(separatedBy: "\n")
-
-        var i = 0
-        while i < lines.count {
-            let line = lines[i]
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            // Fenced code block
-            if trimmed.hasPrefix("```") {
-                let language = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-                var code: [String] = []
-                i += 1
-                while i < lines.count {
-                    let inner = lines[i]
-                    if inner.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
-                        i += 1
-                        break
-                    }
-                    code.append(inner)
-                    i += 1
-                }
-                blocks.append(.codeBlock(language: language.isEmpty ? nil : language, code: code.joined(separator: "\n")))
-                continue
-            }
-
-            if trimmed.isEmpty {
-                i += 1
-                continue
-            }
-
-            // Horizontal rule
-            if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-                blocks.append(.divider())
-                i += 1
-                continue
-            }
-
-            // Headings
-            if let heading = parseHeading(trimmed) {
-                blocks.append(heading)
-                i += 1
-                continue
-            }
-
-            // Block quote
-            if trimmed.hasPrefix("> ") {
-                var quoteLines: [String] = []
-                while i < lines.count {
-                    let t = lines[i].trimmingCharacters(in: .whitespaces)
-                    if t.hasPrefix("> ") {
-                        quoteLines.append(String(t.dropFirst(2)))
-                        i += 1
-                    } else if t.isEmpty {
-                        break
-                    } else {
-                        break
-                    }
-                }
-                blocks.append(.quote(inlineAttributed(quoteLines.joined(separator: " "))))
-                continue
-            }
-
-            // Bullet list
-            if isBullet(trimmed) {
-                var items: [AttributedString] = []
-                while i < lines.count {
-                    let t = lines[i].trimmingCharacters(in: .whitespaces)
-                    if isBullet(t) {
-                        items.append(inlineAttributed(stripBullet(t)))
-                        i += 1
-                    } else if t.isEmpty {
-                        break
-                    } else {
-                        break
-                    }
-                }
-                blocks.append(.bulletList(items: items))
-                continue
-            }
-
-            // Numbered list
-            if isNumbered(trimmed) {
-                var items: [AttributedString] = []
-                while i < lines.count {
-                    let t = lines[i].trimmingCharacters(in: .whitespaces)
-                    if isNumbered(t) {
-                        items.append(inlineAttributed(stripNumber(t)))
-                        i += 1
-                    } else if t.isEmpty {
-                        break
-                    } else {
-                        break
-                    }
-                }
-                blocks.append(.numberedList(items: items))
-                continue
-            }
-
-            // Paragraph: join consecutive non-blank, non-special lines
-            var paragraphLines: [String] = [line]
-            i += 1
-            while i < lines.count {
-                let t = lines[i].trimmingCharacters(in: .whitespaces)
-                if t.isEmpty { break }
-                if t.hasPrefix("```") || isBullet(t) || isNumbered(t) || parseHeading(t) != nil || t.hasPrefix("> ") {
-                    break
-                }
-                paragraphLines.append(lines[i])
-                i += 1
-            }
-            blocks.append(.paragraph(inlineAttributed(paragraphLines.joined(separator: " "))))
-        }
-
-        return blocks
-    }
-
-    private static func parseHeading(_ line: String) -> MarkdownBlock? {
-        var level = 0
-        var idx = line.startIndex
-        while idx < line.endIndex && line[idx] == "#" && level < 6 {
-            level += 1
-            idx = line.index(after: idx)
-        }
-        guard level > 0, idx < line.endIndex, line[idx] == " " else { return nil }
-        let text = String(line[line.index(after: idx)...]).trimmingCharacters(in: .whitespaces)
-        return .heading(level: level, text: text)
-    }
-
-    private static func isBullet(_ line: String) -> Bool {
-        line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ")
-    }
-
-    private static func stripBullet(_ line: String) -> String {
-        String(line.dropFirst(2))
-    }
-
-    private static func isNumbered(_ line: String) -> Bool {
-        let pattern = #"^\d+\.\s"#
-        return line.range(of: pattern, options: .regularExpression) != nil
-    }
-
-    private static func stripNumber(_ line: String) -> String {
-        guard let range = line.range(of: #"^\d+\.\s"#, options: .regularExpression) else { return line }
-        return String(line[range.upperBound...])
-    }
-
-    private static func inlineAttributed(_ text: String) -> AttributedString {
-        // Try full inline markdown first (handles **bold**, *italic*, `code`, [links])
-        if let attr = try? AttributedString(
-            markdown: text,
-            options: AttributedString.MarkdownParsingOptions(
-                interpretedSyntax: .inlineOnlyPreservingWhitespace
-            )
-        ) {
-            return attr
-        }
-        return AttributedString(text)
-    }
-}
-
 // MARK: - Block rendering
 
 private struct MarkdownBlockView: View {
@@ -296,6 +105,33 @@ private struct MarkdownBlockView: View {
                 }
             }
 
+        case .table(let headers, let rows, _):
+            ScrollView(.horizontal, showsIndicators: true) {
+                Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                    GridRow {
+                        ForEach(headers.indices, id: \.self) { column in
+                            MarkdownTableCell(text: headers[column], isHeader: true)
+                        }
+                    }
+
+                    ForEach(rows.indices, id: \.self) { row in
+                        GridRow {
+                            ForEach(headers.indices, id: \.self) { column in
+                                MarkdownTableCell(
+                                    text: cellText(in: rows[row], column: column),
+                                    isHeader: false
+                                )
+                            }
+                        }
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.7)
+                )
+            }
+
         case .codeBlock(let language, let code, _):
             VStack(alignment: .leading, spacing: 6) {
                 if let language, !language.isEmpty {
@@ -338,6 +174,33 @@ private struct MarkdownBlockView: View {
         case 3: .headline
         default: .subheadline.weight(.semibold)
         }
+    }
+
+    private func cellText(in row: [AttributedString], column: Int) -> AttributedString {
+        guard column < row.count else {
+            return AttributedString("")
+        }
+
+        return row[column]
+    }
+}
+
+private struct MarkdownTableCell: View {
+    let text: AttributedString
+    let isHeader: Bool
+
+    var body: some View {
+        Text(text)
+            .font(isHeader ? .callout.weight(.semibold) : .callout)
+            .foregroundStyle(.primary)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .frame(minWidth: 120, maxWidth: 260, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(isHeader ? Color.primary.opacity(0.07) : Color.primary.opacity(0.025))
+            .border(Color.primary.opacity(0.10), width: 0.5)
     }
 }
 

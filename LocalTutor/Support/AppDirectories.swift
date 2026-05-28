@@ -41,4 +41,9 @@ enum AppDirectories {
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }
+
+    static func sessionsFile(fileManager: FileManager = .default) throws -> URL {
+        try applicationSupportRoot(fileManager: fileManager)
+            .appendingPathComponent("study-sessions.json", isDirectory: false)
+    }
 }

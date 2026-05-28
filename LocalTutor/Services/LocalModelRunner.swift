@@ -18,6 +18,34 @@ enum LocalModelRunnerEvent: Sendable {
     case outputChunk(String)
 }
 
+enum LocalModelRunnerStage {
+    static let preparingPrompt = "Preparing prompt"
+    static let generating = "Generating"
+
+    static func checkingModelCache() -> String {
+        "Checking model cache"
+    }
+
+    static func loading(_ profile: InferenceProfile) -> String {
+        "Loading \(profile.name)"
+    }
+
+    static func loaded(_ profile: InferenceProfile) -> String {
+        "Loaded \(profile.name)"
+    }
+
+    static func usingLoaded(_ profile: InferenceProfile) -> String {
+        "Using loaded \(profile.name)"
+    }
+
+    static func endsDownloadPhase(_ message: String) -> Bool {
+        message.hasPrefix("Loaded")
+            || message.hasPrefix("Using loaded")
+            || message == preparingPrompt
+            || message == generating
+    }
+}
+
 enum LocalModelRunnerError: LocalizedError {
     case busy
     case imageRequired
@@ -79,7 +107,10 @@ actor LocalModelRunner {
         }
 
         do {
-            Memory.cacheLimit = 20 * 1024 * 1024
+            // A larger reclaimable buffer cache lets MLX reuse Metal allocations
+            // between decode steps instead of re-allocating every token, which
+            // measurably improves tokens/sec. It is released under memory pressure.
+            Memory.cacheLimit = 256 * 1024 * 1024
             Memory.peakMemory = 0
             mlxMemoryBefore = MLXMemorySnapshotRecord(snapshot: Memory.snapshot())
 
@@ -91,7 +122,7 @@ actor LocalModelRunner {
             loadSeconds = max(0, Date().timeIntervalSince(loadStart) - downloadSeconds)
 
             try Task.checkCancellation()
-            await events(.stage("Preparing prompt"))
+            await events(.stage(LocalModelRunnerStage.preparingPrompt))
             let preparedInput = try await Self.prepareInput(
                 container: container,
                 prompt: prompt,
@@ -100,7 +131,7 @@ actor LocalModelRunner {
             )
 
             try Task.checkCancellation()
-            await events(.stage("Generating"))
+            await events(.stage(LocalModelRunnerStage.generating))
             let parameters = profile.defaults.generateParameters(
                 maxTokensOverride: maxTokens,
                 temperatureOverride: temperature
@@ -195,7 +226,7 @@ actor LocalModelRunner {
         events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
     ) async throws -> LoadedContainer {
         if activeProfileID == profile.id, let activeContainer {
-            await events(.stage("Using loaded \(profile.name)"))
+            await events(.stage(LocalModelRunnerStage.usingLoaded(profile)))
             return LoadedContainer(container: activeContainer, downloadSeconds: 0)
         }
 
@@ -203,9 +234,9 @@ actor LocalModelRunner {
         activeProfileID = nil
         Memory.clearCache()
 
-        await events(.stage("Loading \(profile.name)"))
+        await events(.stage(LocalModelRunnerStage.loading(profile)))
         let tracker = DownloadProgressTracker()
-        await events(.downloadProgress(tracker.start(message: "Checking model cache")))
+        await events(.stage(LocalModelRunnerStage.checkingModelCache()))
         let cacheURL = try AppDirectories.huggingFaceCache()
         let hubClient = HubClient(
             userAgent: "LocalTutor/\(AppInfo.version)",
@@ -215,7 +246,7 @@ actor LocalModelRunner {
         let tokenizerLoader = TransformersTokenizerLoader()
 
         let progressHandler: @Sendable (Progress) -> Void = { progress in
-            let update = tracker.update(progress)
+            guard let update = tracker.update(progress) else { return }
             Task {
                 await events(.downloadProgress(update))
             }
@@ -242,7 +273,7 @@ actor LocalModelRunner {
 
         activeContainer = container
         activeProfileID = profile.id
-        await events(.stage("Loaded \(profile.name)"))
+        await events(.stage(LocalModelRunnerStage.loaded(profile)))
         return LoadedContainer(container: container, downloadSeconds: tracker.downloadSeconds)
     }
 

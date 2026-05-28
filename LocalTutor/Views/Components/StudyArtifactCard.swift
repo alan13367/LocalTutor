@@ -215,15 +215,8 @@ struct StudyArtifactCard: View {
     private var statusBadge: some View {
         switch turn.assistant.status {
         case .streaming:
-            if turn.assistant.isDownloading, let fraction = turn.assistant.downloadProgress {
-                HStack(spacing: 8) {
-                    ProgressView(value: fraction)
-                        .progressViewStyle(.linear)
-                        .frame(width: 90)
-                    Text("\(Int(fraction * 100))%")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
+            if turn.assistant.isDownloading {
+                downloadBadge
             } else {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
@@ -246,6 +239,25 @@ struct StudyArtifactCard: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.orange)
         }
+    }
+
+    private var downloadBadge: some View {
+        HStack(spacing: 8) {
+            DownloadProgressMeter(fraction: turn.assistant.downloadProgress)
+                .frame(width: 92)
+            Text(downloadProgressLabel)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 34, alignment: .trailing)
+        }
+    }
+
+    private var downloadProgressLabel: String {
+        guard let fraction = turn.assistant.downloadProgress else {
+            return "..."
+        }
+
+        return "\(Int(fraction * 100))%"
     }
 
     private var placeholder: some View {
