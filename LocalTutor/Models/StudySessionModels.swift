@@ -8,6 +8,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 enum StudyResourceKind: String, CaseIterable, Identifiable, Codable {
+    case ask
     case summary
     case beginnerExplanation
     case flashcards
@@ -18,6 +19,8 @@ enum StudyResourceKind: String, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
+        case .ask:
+            "Ask"
         case .summary:
             "Summary"
         case .beginnerExplanation:
@@ -33,6 +36,8 @@ enum StudyResourceKind: String, CaseIterable, Identifiable, Codable {
 
     var systemImage: String {
         switch self {
+        case .ask:
+            "questionmark.bubble"
         case .summary:
             "doc.text"
         case .beginnerExplanation:
@@ -48,6 +53,7 @@ enum StudyResourceKind: String, CaseIterable, Identifiable, Codable {
 
     var shortDescription: String {
         switch self {
+        case .ask: "Source Q&A"
         case .summary: "Main ideas, fast"
         case .beginnerExplanation: "Beginner walkthrough"
         case .flashcards: "Interactive deck"
@@ -58,6 +64,7 @@ enum StudyResourceKind: String, CaseIterable, Identifiable, Codable {
 
     var composerPlaceholder: String {
         switch self {
+        case .ask: "Ask anything about your sources."
         case .summary: "Anything specific to focus on? Or just press send for a full summary."
         case .beginnerExplanation: "Add a topic to focus on, or send to explain the whole document."
         case .flashcards: "Add a topic, or send to build flashcards from the sources."
@@ -68,6 +75,8 @@ enum StudyResourceKind: String, CaseIterable, Identifiable, Codable {
 
     var promptInstruction: String {
         switch self {
+        case .ask:
+            "Answer the student's question directly using the provided sources. Do not turn the answer into a beginner explanation unless the student asks for that."
         case .summary:
             "Create a structured study summary with the main ideas, supporting details, and a short review checklist."
         case .beginnerExplanation:
@@ -78,6 +87,24 @@ enum StudyResourceKind: String, CaseIterable, Identifiable, Codable {
             "Create a quiz with a mix of multiple choice and short-answer questions. Put the answer key after the questions."
         case .cheatSheet:
             "Create a compact exam cheat sheet with formulas, commands, definitions, pitfalls, and high-yield reminders."
+        }
+    }
+
+    var composerActionTitle: String {
+        switch self {
+        case .ask:
+            "Ask"
+        default:
+            "Create"
+        }
+    }
+
+    var allowsEmptyFocus: Bool {
+        switch self {
+        case .ask:
+            false
+        default:
+            true
         }
     }
 }
@@ -275,6 +302,9 @@ struct StudyTurnUser: Identifiable, Equatable, Codable {
     var displayPrompt: String {
         let trimmed = focus.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
+        if resourceKind == .ask {
+            return "Ask about my sources"
+        }
         return "Create a \(resourceKind.title.lowercased()) from my sources"
     }
 }
@@ -316,7 +346,7 @@ struct StudySession: Identifiable, Equatable, Codable {
         updatedAt: Date = Date(),
         sources: [StudySource] = [],
         turns: [StudyTurn] = [],
-        selectedResource: StudyResourceKind = .summary
+        selectedResource: StudyResourceKind = .ask
     ) {
         self.id = id
         self.title = title
@@ -393,6 +423,11 @@ struct RefinementSuggestion: Identifiable, Equatable {
             )
         ]
         switch kind {
+        case .ask:
+            return universal + [
+                RefinementSuggestion(label: "Make flashcards", systemImage: "rectangle.stack", instruction: "Turn the previous answer into focused flashcards.", newKind: .flashcards),
+                RefinementSuggestion(label: "Quiz me", systemImage: "checklist", instruction: "Turn the previous answer into a short quiz.", newKind: .quiz)
+            ]
         case .summary:
             return universal + [
                 RefinementSuggestion(label: "Make flashcards", systemImage: "rectangle.stack", instruction: "Turn the previous answer into focused flashcards.", newKind: .flashcards),
@@ -428,6 +463,7 @@ struct StudyExamplePrompt: Identifiable {
     var kind: StudyResourceKind
 
     static let starter: [StudyExamplePrompt] = [
+        StudyExamplePrompt(title: "Ask a question", subtitle: "Direct source Q&A", systemImage: "questionmark.bubble", focus: "What should I know first from these sources?", kind: .ask),
         StudyExamplePrompt(title: "Summarize my notes", subtitle: "Get the main ideas, fast", systemImage: "doc.text", focus: "Summarize the attached material into the most important ideas.", kind: .summary),
         StudyExamplePrompt(title: "Explain like I'm new", subtitle: "Beginner-friendly walkthrough", systemImage: "lightbulb", focus: "Explain the attached material as if I'm new to this topic.", kind: .beginnerExplanation),
         StudyExamplePrompt(title: "Make flashcards", subtitle: "Active recall, ready to drill", systemImage: "rectangle.stack", focus: "Create flashcards covering the most testable points in the attached material.", kind: .flashcards),

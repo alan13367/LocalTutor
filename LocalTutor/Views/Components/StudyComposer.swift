@@ -33,7 +33,7 @@ struct StudyComposer: View {
     private var kindPicker: some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Create")
+                Text(viewModel.selectedResource.composerActionTitle)
                     .font(.caption2.weight(.bold))
                     .textCase(.uppercase)
                     .foregroundStyle(.secondary)
@@ -170,7 +170,7 @@ private struct KindPill: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .help("Create a \(kind.title.lowercased())")
+        .help(kind == .ask ? "Ask about sources" : "Create a \(kind.title.lowercased())")
         .animation(.easeOut(duration: 0.15), value: isSelected)
         .animation(.easeOut(duration: 0.12), value: isHovering)
     }

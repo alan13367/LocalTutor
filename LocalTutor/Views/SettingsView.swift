@@ -30,6 +30,16 @@ struct SettingsView: View {
             .background(Color(nsColor: .windowBackgroundColor))
         }
         .frame(minWidth: 720, idealWidth: 820, minHeight: 560, idealHeight: 700)
+        .overlay(alignment: .bottomTrailing) {
+            if let status = viewModel.modelDownloadStatus {
+                ModelDownloadToast(status: status) {
+                    viewModel.dismissModelDownloadStatus()
+                }
+                .padding(20)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: viewModel.modelDownloadStatus)
     }
 
     private var header: some View {

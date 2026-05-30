@@ -4,6 +4,7 @@
 //
 //
 
+import CoreImage
 import Foundation
 import HuggingFace
 import MLX
@@ -76,6 +77,26 @@ actor LocalModelRunner {
         temperature: Float? = nil,
         events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
     ) async throws -> BenchmarkRecord {
+        let promptContent = try Self.makeModelLabPromptContent(
+            prompt: prompt,
+            imageURL: imageURL
+        )
+        return try await run(
+            profile: profile,
+            promptContent: promptContent,
+            maxTokens: maxTokens,
+            temperature: temperature,
+            events: events
+        )
+    }
+
+    func run(
+        profile: InferenceProfile,
+        promptContent: StudyPromptContent,
+        maxTokens: Int? = nil,
+        temperature: Float? = nil,
+        events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws -> BenchmarkRecord {
         guard !isRunning else {
             throw LocalModelRunnerError.busy
         }
@@ -99,18 +120,9 @@ actor LocalModelRunner {
         let sampler = MemorySampler()
         await sampler.start()
 
-        let securityAccess = imageURL?.startAccessingSecurityScopedResource() ?? false
-        defer {
-            if securityAccess {
-                imageURL?.stopAccessingSecurityScopedResource()
-            }
-        }
-
         do {
-            // A larger reclaimable buffer cache lets MLX reuse Metal allocations
-            // between decode steps instead of re-allocating every token, which
-            // measurably improves tokens/sec. It is released under memory pressure.
-            Memory.cacheLimit = 256 * 1024 * 1024
+            Memory.cacheLimit = Self.cacheLimit(for: profile)
+            Memory.clearCache()
             Memory.peakMemory = 0
             mlxMemoryBefore = MLXMemorySnapshotRecord(snapshot: Memory.snapshot())
 
@@ -120,15 +132,16 @@ actor LocalModelRunner {
             let container = loadResult.container
             downloadSeconds = loadResult.downloadSeconds
             loadSeconds = max(0, Date().timeIntervalSince(loadStart) - downloadSeconds)
+            Memory.clearCache()
 
             try Task.checkCancellation()
             await events(.stage(LocalModelRunnerStage.preparingPrompt))
             let preparedInput = try await Self.prepareInput(
                 container: container,
-                prompt: prompt,
-                profile: profile,
-                imageURL: imageURL
+                promptContent: promptContent,
+                profile: profile
             )
+            Memory.clearCache()
 
             try Task.checkCancellation()
             await events(.stage(LocalModelRunnerStage.generating))
@@ -184,8 +197,11 @@ actor LocalModelRunner {
             modelID: profile.modelIdentifier,
             kind: profile.kind.rawValue,
             tier: profile.tier.rawValue,
-            prompt: prompt,
-            imageFilename: imageURL?.lastPathComponent,
+            prompt: promptContent.benchmarkText,
+            imageFilename: promptContent.imageFilenames.first,
+            imageFilenames: promptContent.imageFilenames,
+            includedImageCount: promptContent.includedImageCount,
+            omittedImageCount: promptContent.omittedImageCount,
             timing: BenchmarkTiming(
                 downloadSeconds: downloadSeconds,
                 loadSeconds: loadSeconds,
@@ -205,6 +221,24 @@ actor LocalModelRunner {
     func unload() {
         activeContainer = nil
         activeProfileID = nil
+        Memory.clearCache()
+    }
+
+    func preload(
+        profile: InferenceProfile,
+        events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws {
+        while isRunning {
+            try Task.checkCancellation()
+            try await Task.sleep(nanoseconds: 150_000_000)
+        }
+
+        isRunning = true
+        defer { isRunning = false }
+
+        Memory.cacheLimit = Self.cacheLimit(for: profile)
+        Memory.clearCache()
+        _ = try await loadContainerIfNeeded(profile: profile, events: events)
         Memory.clearCache()
     }
 
@@ -279,23 +313,84 @@ actor LocalModelRunner {
 
     nonisolated private static func prepareInput(
         container: ModelContainer,
-        prompt: String,
-        profile: InferenceProfile,
-        imageURL: URL?
+        promptContent: StudyPromptContent,
+        profile: InferenceProfile
     ) async throws -> LMInput {
-        let input = try makeUserInput(prompt: prompt, profile: profile, imageURL: imageURL)
+        let input = try makeUserInput(promptContent: promptContent, profile: profile)
         return try await container.prepare(input: input)
     }
 
     nonisolated private static func makeUserInput(
-        prompt: String,
-        profile: InferenceProfile,
-        imageURL: URL?
+        promptContent: StudyPromptContent,
+        profile: InferenceProfile
     ) throws -> UserInput {
-        let images = imageURL.map { [UserInput.Image.url($0)] } ?? []
-        var input = UserInput(prompt: prompt, images: images)
-        input.processing = UserInput.Processing(resize: profile.defaults.imageResize)
+        var chat: [Chat.Message] = []
+        if !promptContent.systemInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            chat.append(.system(promptContent.systemInstruction))
+        }
+        if !promptContent.openingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            chat.append(.user(promptContent.openingText))
+        }
+
+        for block in promptContent.sourceBlocks {
+            switch block {
+            case .text(let text):
+                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    chat.append(.user(text))
+                }
+            case .image(let image):
+                chat.append(.user(image.displayCaption, images: [.ciImage(image.image)]))
+            }
+        }
+
+        if !promptContent.warnings.isEmpty {
+            chat.append(.user("Source warnings:\n" + promptContent.warnings.map { "- \($0)" }.joined(separator: "\n")))
+        }
+        if !promptContent.closingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            chat.append(.user(promptContent.closingText))
+        }
+
+        let input = UserInput(
+            chat: chat,
+            processing: UserInput.Processing(resize: profile.defaults.imageResize)
+        )
         return input
+    }
+
+    nonisolated private static func makeModelLabPromptContent(
+        prompt: String,
+        imageURL: URL?
+    ) throws -> StudyPromptContent {
+        guard let imageURL else {
+            return StudyPromptBuilder.modelLabContent(prompt: prompt, image: nil)
+        }
+
+        let granted = imageURL.startAccessingSecurityScopedResource()
+        defer {
+            if granted {
+                imageURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        guard let image = CIImage(contentsOf: imageURL, options: [.applyOrientationProperty: true]) else {
+            throw LocalModelRunnerError.imageRequired
+        }
+
+        let documentImage = DocumentImage(
+            image: image,
+            sourceName: imageURL.lastPathComponent,
+            locator: nil,
+            caption: nil,
+            isStandalone: true,
+            originalSize: image.extent.size
+        )
+        return StudyPromptBuilder.modelLabContent(prompt: prompt, image: documentImage)
+    }
+
+    nonisolated private static func cacheLimit(for profile: InferenceProfile) -> Int {
+        profile.defaults.maxKVSize <= 2_048
+            ? 64 * 1024 * 1024
+            : 128 * 1024 * 1024
     }
 }
 

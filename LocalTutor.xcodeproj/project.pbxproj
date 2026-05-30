@@ -17,6 +17,9 @@
 		CABA406B6BCA80B097963C0B /* LocalModelRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69A0AC9384D73E9C72DEA760 /* LocalModelRunnerTests.swift */; };
 		E247F3A975ADFBDC51817D64 /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = 4E093CE2DC08B8C56FF3477A /* Tokenizers */; };
 		EF3F51A238872DDFF8A01429 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 2AF15760E0C35145F41C5A1F /* MLXLMCommon */; };
+		F21C4FB1BA110000BA110000 /* SourceExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F21C4FB1BA220000BA220000 /* SourceExtractorTests.swift */; };
+		F911A1E3AA001111AA001111 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = F911A1E3AA002222AA002222 /* ZIPFoundation */; };
+		F911A1E3AA003333AA003333 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = F911A1E3AA004444AA004444 /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -36,6 +39,7 @@
 		72375BAF9CA0C8D0980218C1 /* LocalTutorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LocalTutorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E18B94AB0EFC8197AE0BDFF7 /* MemoryPreflightTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryPreflightTests.swift; sourceTree = "<group>"; };
 		E74411EA2FC83B2900FB6366 /* LocalTutor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LocalTutor.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F21C4FB1BA220000BA220000 /* SourceExtractorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SourceExtractorTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -55,6 +59,7 @@
 				0E703F79516D5BA0C062EC44 /* MLXVLM in Frameworks */,
 				EF3F51A238872DDFF8A01429 /* MLXLMCommon in Frameworks */,
 				6C5D8678F853DD78D6AA981E /* (null) in Frameworks */,
+				F911A1E3AA001111AA001111 /* ZIPFoundation in Frameworks */,
 				70BCCC648E62165587D1465F /* HuggingFace in Frameworks */,
 				E247F3A975ADFBDC51817D64 /* Tokenizers in Frameworks */,
 			);
@@ -64,6 +69,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F911A1E3AA003333AA003333 /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -95,6 +101,7 @@
 				4E030123AA43908C03B6E293 /* InferenceProfileTests.swift */,
 				69A0AC9384D73E9C72DEA760 /* LocalModelRunnerTests.swift */,
 				E18B94AB0EFC8197AE0BDFF7 /* MemoryPreflightTests.swift */,
+				F21C4FB1BA220000BA220000 /* SourceExtractorTests.swift */,
 			);
 			path = LocalTutorTests;
 			sourceTree = "<group>";
@@ -116,6 +123,9 @@
 				FF7ED84E037326296BF1924E /* PBXTargetDependency */,
 			);
 			name = LocalTutorTests;
+			packageProductDependencies = (
+				F911A1E3AA004444AA004444 /* ZIPFoundation */,
+			);
 			productName = LocalTutorTests;
 			productReference = 72375BAF9CA0C8D0980218C1 /* LocalTutorTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -142,6 +152,7 @@
 				2AF15760E0C35145F41C5A1F /* MLXLMCommon */,
 				1462228AFA92EF77605BE44D /* HuggingFace */,
 				4E093CE2DC08B8C56FF3477A /* Tokenizers */,
+				F911A1E3AA002222AA002222 /* ZIPFoundation */,
 			);
 			productName = LocalTutor;
 			productReference = E74411EA2FC83B2900FB6366 /* LocalTutor.app */;
@@ -175,6 +186,7 @@
 				0002DC0D93EB1C3203E16FD0 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
 				1C9786D491B0853593D12C25 /* XCRemoteSwiftPackageReference "swift-huggingface" */,
 				E0C3A8491DAEB49A54FCF20B /* XCRemoteSwiftPackageReference "swift-transformers" */,
+				F911A1E3AA005555AA005555 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E74411EB2FC83B2900FB6366 /* Products */;
@@ -213,6 +225,7 @@
 				717A24CDB5BF14248879173C /* InferenceProfileTests.swift in Sources */,
 				CABA406B6BCA80B097963C0B /* LocalModelRunnerTests.swift in Sources */,
 				679EB339C03BB5D60E5AB0C0 /* MemoryPreflightTests.swift in Sources */,
+				F21C4FB1BA110000BA110000 /* SourceExtractorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -510,6 +523,14 @@
 				minimumVersion = 1.3.0;
 			};
 		};
+		F911A1E3AA005555AA005555 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.19;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -537,6 +558,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0002DC0D93EB1C3203E16FD0 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = MLXLLM;
+		};
+		F911A1E3AA002222AA002222 /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F911A1E3AA005555AA005555 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
+		F911A1E3AA004444AA004444 /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F911A1E3AA005555AA005555 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

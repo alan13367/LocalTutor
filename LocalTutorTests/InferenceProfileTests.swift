@@ -22,6 +22,10 @@ struct InferenceProfileTests {
             8.gibibytes,
             16.gibibytes
         ])
+        #expect(profiles.map(\.defaults.documentImageLimit) == [2, 4])
+        #expect(profiles.map(\.defaults.maxKVSize) == [6_144, 2_048])
+        #expect(InferenceProfile.gemma4E4B.defaults.maxTokens == 512)
+        #expect(InferenceProfile.gemma4E4B.defaults.prefillStepSize == 64)
     }
 
     @Test
@@ -29,5 +33,16 @@ struct InferenceProfileTests {
         let profiles = InferenceProfile.studyCatalog
 
         #expect(profiles.map(\.id) == ["gemma4E2B", "gemma4E4B", "qwen3VL4B"])
+        #expect(InferenceProfile.qwen3VL4B.defaults.maxKVSize == 2_048)
+        #expect(InferenceProfile.qwen3VL4B.defaults.maxTokens == 512)
+        #expect(InferenceProfile.qwen3VL4B.defaults.prefillStepSize == 64)
+    }
+
+    @Test
+    func e4BPromptBudgetLeavesRuntimeHeadroom() {
+        let budget = PromptPacker.promptBudget(for: .gemma4E4B, resourceKind: .summary)
+
+        #expect(budget <= InferenceProfile.gemma4E4B.defaults.maxKVSize / 3)
+        #expect(budget >= 256)
     }
 }

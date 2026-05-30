@@ -9,6 +9,22 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum ModelDownloadPhase: Equatable {
+    case checking
+    case downloading
+    case loading
+    case ready
+    case failed
+}
+
+struct ModelDownloadStatus: Equatable {
+    var profileID: String
+    var profileName: String
+    var message: String
+    var fraction: Double?
+    var phase: ModelDownloadPhase
+}
+
 @MainActor
 final class StudyWorkspaceViewModel: ObservableObject {
     // Persisted study-session history. Each session owns its own sources + turns.
@@ -18,6 +34,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
     // Ephemeral, not persisted with the session.
     @Published var composerText: String = ""
     @Published var globalError: String?
+    @Published var modelDownloadStatus: ModelDownloadStatus?
 
     /// The session that owns the in-flight generation, if any.
     @Published private(set) var runningSessionID: UUID?
@@ -28,6 +45,9 @@ final class StudyWorkspaceViewModel: ObservableObject {
     private let store = SessionStore()
     private var runTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
+    private var modelPreloadTask: Task<Void, Error>?
+    private var modelPreloadProfileID: String?
+    private var modelDownloadDismissTask: Task<Void, Never>?
     private var hasLoaded = false
 
     // Streaming coalescing: buffer tokens and flush to the UI on a frame cadence
@@ -151,8 +171,160 @@ final class StudyWorkspaceViewModel: ObservableObject {
 
     func setActiveProfile(_ profile: InferenceProfile) {
         storedProfileID = profile.id
-        Task { await runner.unload() }
+        startModelPreload(for: profile)
         objectWillChange.send()
+    }
+
+    func dismissModelDownloadStatus() {
+        modelDownloadDismissTask?.cancel()
+        modelDownloadDismissTask = nil
+        modelDownloadStatus = nil
+    }
+
+    private func startModelPreload(for profile: InferenceProfile) {
+        guard MemoryPreflight.evaluate(profile: profile).canRun else {
+            return
+        }
+        if modelPreloadProfileID == profile.id, modelPreloadTask != nil {
+            return
+        }
+
+        modelPreloadTask?.cancel()
+        modelDownloadDismissTask?.cancel()
+        modelDownloadDismissTask = nil
+        modelPreloadProfileID = profile.id
+        modelDownloadStatus = ModelDownloadStatus(
+            profileID: profile.id,
+            profileName: profile.name,
+            message: "Preparing \(profile.name)",
+            fraction: nil,
+            phase: .checking
+        )
+
+        let runner = runner
+        modelPreloadTask = Task { [weak self] in
+            do {
+                try await runner.preload(profile: profile) { [weak self] event in
+                    await self?.handleModelLoad(event, profile: profile)
+                }
+                await MainActor.run {
+                    self?.completeModelPreload(for: profile)
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self?.clearModelPreloadIfCurrent(profile)
+                }
+                throw CancellationError()
+            } catch {
+                await MainActor.run {
+                    self?.failModelPreload(for: profile, error: error)
+                }
+                throw error
+            }
+        }
+    }
+
+    private func waitForModelPreloadIfNeeded(profile: InferenceProfile, turnID: UUID) async throws {
+        guard modelPreloadProfileID == profile.id, let task = modelPreloadTask else {
+            return
+        }
+        updateStatusIfStreaming(turnID: turnID, message: "Waiting for \(profile.name)")
+        try Task.checkCancellation()
+        try await task.value
+        try Task.checkCancellation()
+    }
+
+    private func handleModelLoad(_ event: LocalModelRunnerEvent, profile: InferenceProfile) {
+        switch event {
+        case .stage(let message):
+            if message == LocalModelRunnerStage.checkingModelCache() {
+                updateModelDownloadStatus(for: profile, message: message, fraction: nil, phase: .checking)
+            } else if message.hasPrefix("Loading") {
+                updateModelDownloadStatus(for: profile, message: message, fraction: nil, phase: .loading)
+            } else if LocalModelRunnerStage.endsDownloadPhase(message) {
+                guard modelDownloadStatus?.profileID == profile.id || modelPreloadProfileID == profile.id else {
+                    return
+                }
+                markModelReady(for: profile)
+            }
+
+        case .downloadProgress(let update):
+            updateModelDownloadStatus(
+                for: profile,
+                message: update.message,
+                fraction: update.fraction,
+                phase: .downloading
+            )
+
+        case .outputChunk:
+            break
+        }
+    }
+
+    private func updateModelDownloadStatus(
+        for profile: InferenceProfile,
+        message: String,
+        fraction: Double?,
+        phase: ModelDownloadPhase
+    ) {
+        modelDownloadDismissTask?.cancel()
+        modelDownloadDismissTask = nil
+        modelDownloadStatus = ModelDownloadStatus(
+            profileID: profile.id,
+            profileName: profile.name,
+            message: message,
+            fraction: fraction,
+            phase: phase
+        )
+    }
+
+    private func completeModelPreload(for profile: InferenceProfile) {
+        markModelReady(for: profile)
+        clearModelPreloadIfCurrent(profile)
+    }
+
+    private func markModelReady(for profile: InferenceProfile) {
+        guard modelDownloadStatus?.profileID == profile.id || modelPreloadProfileID == profile.id else {
+            return
+        }
+        modelDownloadStatus = ModelDownloadStatus(
+            profileID: profile.id,
+            profileName: profile.name,
+            message: "\(profile.name) is ready",
+            fraction: 1,
+            phase: .ready
+        )
+        scheduleModelDownloadDismiss()
+    }
+
+    private func failModelPreload(for profile: InferenceProfile, error: Error) {
+        clearModelPreloadIfCurrent(profile)
+        modelDownloadStatus = ModelDownloadStatus(
+            profileID: profile.id,
+            profileName: profile.name,
+            message: error.localizedDescription,
+            fraction: nil,
+            phase: .failed
+        )
+    }
+
+    private func clearModelPreloadIfCurrent(_ profile: InferenceProfile) {
+        guard modelPreloadProfileID == profile.id else { return }
+        modelPreloadProfileID = nil
+        modelPreloadTask = nil
+    }
+
+    private func scheduleModelDownloadDismiss() {
+        modelDownloadDismissTask?.cancel()
+        modelDownloadDismissTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard self?.modelDownloadStatus?.phase == .ready else { return }
+                self?.modelDownloadStatus = nil
+                self?.modelDownloadDismissTask = nil
+            }
+        }
     }
 
     var preflight: MemoryPreflightResult {
@@ -178,7 +350,10 @@ final class StudyWorkspaceViewModel: ObservableObject {
     var canSend: Bool {
         guard runningSessionID == nil else { return false }
         let hasText = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return hasText || !sources.isEmpty
+        if selectedResource.allowsEmptyFocus {
+            return hasText || !sources.isEmpty
+        }
+        return hasText
     }
 
     var sourceSummary: String {
@@ -330,7 +505,6 @@ final class StudyWorkspaceViewModel: ObservableObject {
         let turnID = turn.id
         let sessionID = currentSessionID
         let history = Array(turns.dropLast())
-        let imageURL = user.sources.first(where: \.isImage)?.accessibleURL ?? selectedImageURL
 
         pendingChunks = ""
         flushScheduled = false
@@ -338,34 +512,95 @@ final class StudyWorkspaceViewModel: ObservableObject {
 
         runTask = Task { [weak self] in
             guard let self else { return }
-            let extracted = await SourceExtractor.extract(user.sources)
-            await MainActor.run {
-                self.updateStatusIfStreaming(turnID: turnID, message: "Starting \(profile.name)")
-            }
-
-            let prompt = StudyPromptBuilder.prompt(for: user, history: history, extracted: extracted)
-
             let maxTokens: Int? = user.resourceKind.isInteractive ? 2048 : nil
             let temperature: Float? = user.resourceKind.isInteractive ? 0.1 : nil
 
             do {
+                try await self.waitForModelPreloadIfNeeded(profile: profile, turnID: turnID)
+                let promptContent = try await SourceContextPlanner.content(
+                    for: user,
+                    history: history,
+                    profile: profile,
+                    generateIntermediate: { [weak self] content, maxTokens, temperature in
+                        guard let self else { throw CancellationError() }
+                        let record = try await self.runner.run(
+                            profile: profile,
+                            promptContent: content,
+                            maxTokens: maxTokens,
+                            temperature: temperature
+                        ) { [weak self] event in
+                            await self?.handleIntermediate(event, turnID: turnID)
+                            await self?.handleModelLoad(event, profile: profile)
+                        }
+                        switch record.status {
+                        case .success:
+                            return record.output
+                        case .cancelled:
+                            throw CancellationError()
+                        case .failed, .skipped:
+                            throw SourceContextPlannerError.intermediateFailed(
+                                record.errorMessage ?? "The local model could not summarize an intermediate source section."
+                            )
+                        }
+                    },
+                    status: { [weak self] message in
+                        await MainActor.run {
+                            self?.updateStatusIfStreaming(turnID: turnID, message: message)
+                        }
+                    }
+                )
+                await MainActor.run {
+                    let figureText = promptContent.includedImageCount == 0
+                        ? "Starting \(profile.name)"
+                        : "Includes \(promptContent.includedImageCount) figure\(promptContent.includedImageCount == 1 ? "" : "s")"
+                    self.updateStatusIfStreaming(turnID: turnID, message: figureText)
+                }
+
                 let record = try await self.runner.run(
                     profile: profile,
-                    prompt: prompt,
-                    imageURL: imageURL,
+                    promptContent: promptContent,
                     maxTokens: maxTokens,
                     temperature: temperature
                 ) { [weak self] event in
                     await self?.handle(event, turnID: turnID, kind: user.resourceKind)
+                    await self?.handleModelLoad(event, profile: profile)
                 }
                 await MainActor.run {
                     self.finish(record: record, turnID: turnID)
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.cancel(turnID: turnID)
                 }
             } catch {
                 await MainActor.run {
                     self.fail(turnID: turnID, message: error.localizedDescription)
                 }
             }
+        }
+    }
+
+    private func handleIntermediate(_ event: LocalModelRunnerEvent, turnID: UUID) {
+        switch event {
+        case .stage(let message):
+            if message == LocalModelRunnerStage.preparingPrompt || message == LocalModelRunnerStage.generating {
+                return
+            }
+            updateTurn(turnID) { turn in
+                turn.assistant.statusMessage = message
+                if LocalModelRunnerStage.endsDownloadPhase(message) {
+                    turn.assistant.isDownloading = false
+                    turn.assistant.downloadProgress = nil
+                }
+            }
+        case .downloadProgress(let update):
+            updateTurn(turnID) { turn in
+                turn.assistant.isDownloading = true
+                turn.assistant.downloadProgress = update.fraction
+                turn.assistant.statusMessage = update.message
+            }
+        case .outputChunk:
+            break
         }
     }
 
@@ -497,6 +732,20 @@ final class StudyWorkspaceViewModel: ObservableObject {
         updateTurn(turnID) { turn in
             turn.assistant.status = .failed(message)
             turn.assistant.statusMessage = "Failed"
+            turn.assistant.finishedAt = Date()
+            turn.assistant.isDownloading = false
+            turn.assistant.downloadProgress = nil
+        }
+        scheduleSave()
+    }
+
+    private func cancel(turnID: UUID) {
+        pendingChunks = ""
+        flushScheduled = false
+        runningSessionID = nil
+        updateTurn(turnID) { turn in
+            turn.assistant.status = .cancelled
+            turn.assistant.statusMessage = "Cancelled"
             turn.assistant.finishedAt = Date()
             turn.assistant.isDownloading = false
             turn.assistant.downloadProgress = nil

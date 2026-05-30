@@ -42,6 +42,13 @@ enum AppDirectories {
         return directory
     }
 
+    static func sourceIndexes(fileManager: FileManager = .default) throws -> URL {
+        let directory = try applicationSupportRoot(fileManager: fileManager)
+            .appendingPathComponent("SourceIndexes", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
     static func sessionsFile(fileManager: FileManager = .default) throws -> URL {
         try applicationSupportRoot(fileManager: fileManager)
             .appendingPathComponent("study-sessions.json", isDirectory: false)

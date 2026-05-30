@@ -26,6 +26,8 @@ struct GenerationDefaults: Equatable, Sendable {
     var maxKVSize: Int
     var kvBits: Int
     var imageResize: CGSize?
+    var documentImageLimit: Int
+    var minEmbeddedImageDimension: CGFloat
 
     static let text = GenerationDefaults(
         maxTokens: 1024,
@@ -34,7 +36,9 @@ struct GenerationDefaults: Equatable, Sendable {
         prefillStepSize: 256,
         maxKVSize: 6144,
         kvBits: 4,
-        imageResize: nil
+        imageResize: nil,
+        documentImageLimit: 0,
+        minEmbeddedImageDimension: 64
     )
 
     static let vision = GenerationDefaults(
@@ -44,8 +48,34 @@ struct GenerationDefaults: Equatable, Sendable {
         prefillStepSize: 256,
         maxKVSize: 6144,
         kvBits: 4,
-        imageResize: CGSize(width: 1024, height: 1024)
+        imageResize: CGSize(width: 1024, height: 1024),
+        documentImageLimit: 2,
+        minEmbeddedImageDimension: 64
     )
+
+    func withDocumentImageLimit(_ limit: Int) -> GenerationDefaults {
+        var copy = self
+        copy.documentImageLimit = limit
+        return copy
+    }
+
+    func withMaxKVSize(_ maxKVSize: Int) -> GenerationDefaults {
+        var copy = self
+        copy.maxKVSize = maxKVSize
+        return copy
+    }
+
+    func withMaxTokens(_ maxTokens: Int) -> GenerationDefaults {
+        var copy = self
+        copy.maxTokens = maxTokens
+        return copy
+    }
+
+    func withPrefillStepSize(_ prefillStepSize: Int) -> GenerationDefaults {
+        var copy = self
+        copy.prefillStepSize = prefillStepSize
+        return copy
+    }
 }
 
 enum ProfileModelConfiguration: Sendable {

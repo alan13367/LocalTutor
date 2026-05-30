@@ -95,12 +95,23 @@ struct StudyWorkspaceView: View {
             }
         }
         .overlay(FullWindowDropOverlay(isActive: isDropTargeted))
+        .overlay(alignment: .bottomTrailing) {
+            if let status = viewModel.modelDownloadStatus {
+                ModelDownloadToast(status: status) {
+                    viewModel.dismissModelDownloadStatus()
+                }
+                .padding(.trailing, 24)
+                .padding(.bottom, 116)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
         .onDrop(
             of: [UTType.fileURL],
             isTargeted: $isDropTargeted,
             perform: viewModel.importFromDropProviders
         )
         .animation(.easeOut(duration: 0.2), value: viewModel.turns.count)
+        .animation(.easeOut(duration: 0.18), value: viewModel.modelDownloadStatus)
     }
 
     private var backgroundGradient: some View {

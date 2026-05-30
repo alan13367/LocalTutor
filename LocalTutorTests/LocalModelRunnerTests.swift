@@ -63,4 +63,17 @@ struct LocalModelRunnerTests {
         #expect(update?.fraction == 0.2)
         #expect(update?.message == "Downloading 20%")
     }
+
+    @Test
+    func downloadProgressTrackerUsesChildProgressFraction() {
+        let tracker = DownloadProgressTracker()
+        let parent = Progress(totalUnitCount: 1_000)
+        let child = Progress(totalUnitCount: 1_000, parent: parent, pendingUnitCount: 1_000)
+        child.completedUnitCount = 250
+
+        let update = tracker.update(parent)
+
+        #expect(update?.fraction == 0.25)
+        #expect(update?.message == "Downloading 25%")
+    }
 }

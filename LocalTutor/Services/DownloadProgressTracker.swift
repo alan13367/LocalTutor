@@ -58,13 +58,20 @@ final class DownloadProgressTracker: @unchecked Sendable {
     }
 
     private func determinateFraction(for progress: Progress) -> Double? {
+        let progressFraction = progress.fractionCompleted
+        if progressFraction.isFinite, progressFraction > 0, progressFraction < 1 {
+            return max(0, min(1, progressFraction))
+        }
+
         guard progress.totalUnitCount > 0 else {
-            let fraction = progress.fractionCompleted
-            return fraction.isFinite ? max(0, min(1, fraction)) : nil
+            if progressFraction.isFinite, progressFraction >= 1 {
+                return 1
+            }
+            return nil
         }
 
         let fraction = Double(progress.completedUnitCount) / Double(progress.totalUnitCount)
-        return max(0, min(1, fraction))
+        return fraction.isFinite ? max(0, min(1, fraction)) : nil
     }
 
     private func message(for progress: Progress, fraction: Double?) -> String {
@@ -78,7 +85,10 @@ final class DownloadProgressTracker: @unchecked Sendable {
 
         let percent = Int((fraction * 100).rounded(.down))
         if progress.totalUnitCount > 1_000_000 {
-            let completed = min(max(progress.completedUnitCount, 0), progress.totalUnitCount)
+            let completedUnits = progress.completedUnitCount > 0
+                ? Double(progress.completedUnitCount)
+                : Double(progress.totalUnitCount) * fraction
+            let completed = min(max(Int64(completedUnits), 0), progress.totalUnitCount)
             let completedText = ByteCountFormatter.localTutorMemoryString(fromByteCount: completed)
             let totalText = ByteCountFormatter.localTutorMemoryString(fromByteCount: progress.totalUnitCount)
             return "Downloading \(percent)% · \(completedText) of \(totalText)"

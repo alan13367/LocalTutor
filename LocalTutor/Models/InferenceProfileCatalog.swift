@@ -32,7 +32,11 @@ enum InferenceProfileCatalog {
         kind: .vision,
         tier: .sixteenGB,
         minimumSystemMemoryBytes: 16.gibibytes,
-        defaults: .vision,
+        defaults: GenerationDefaults.vision
+            .withDocumentImageLimit(4)
+            .withMaxTokens(512)
+            .withMaxKVSize(2_048)
+            .withPrefillStepSize(64),
         configuration: .vlm(VLMRegistry.gemma4_E4B_it_4bit),
         publisher: "Google",
         summary: "Balanced multimodal model. Best baseline quality for 16 GB Macs across study tasks.",
@@ -49,7 +53,11 @@ enum InferenceProfileCatalog {
         kind: .vision,
         tier: .sixteenGB,
         minimumSystemMemoryBytes: 16.gibibytes,
-        defaults: .vision,
+        defaults: GenerationDefaults.vision
+            .withDocumentImageLimit(4)
+            .withMaxTokens(512)
+            .withMaxKVSize(2_048)
+            .withPrefillStepSize(64),
         configuration: .vlm(VLMRegistry.qwen3VL4BInstruct4Bit),
         publisher: "Alibaba",
         summary: "Top-tier small vision model. Excellent OCR and document understanding for screenshots and slides.",
