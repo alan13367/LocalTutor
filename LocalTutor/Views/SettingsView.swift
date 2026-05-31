@@ -126,7 +126,7 @@ struct SettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(spacing: 10) {
-                ForEach(InferenceProfile.studyCatalog) { profile in
+                ForEach(ModelProfile.studyCatalog) { profile in
                     ModelOptionRow(
                         profile: profile,
                         isSelected: profile.id == viewModel.activeProfile.id,
@@ -165,7 +165,7 @@ struct SettingsView: View {
 }
 
 private struct ModelOptionRow: View {
-    let profile: InferenceProfile
+    let profile: ModelProfile
     let isSelected: Bool
     let canRun: Bool
     var onSelect: () -> Void

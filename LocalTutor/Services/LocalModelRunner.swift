@@ -27,15 +27,15 @@ enum LocalModelRunnerStage {
         "Checking model cache"
     }
 
-    static func loading(_ profile: InferenceProfile) -> String {
+    static func loading(_ profile: ModelProfile) -> String {
         "Loading \(profile.name)"
     }
 
-    static func loaded(_ profile: InferenceProfile) -> String {
+    static func loaded(_ profile: ModelProfile) -> String {
         "Loaded \(profile.name)"
     }
 
-    static func usingLoaded(_ profile: InferenceProfile) -> String {
+    static func usingLoaded(_ profile: ModelProfile) -> String {
         "Using loaded \(profile.name)"
     }
 
@@ -64,20 +64,20 @@ enum LocalModelRunnerError: LocalizedError {
     }
 }
 
-actor LocalModelRunner {
+actor LocalModelRunner: InferenceService {
     private var activeContainer: ModelContainer?
     private var activeProfileID: String?
     private var isRunning = false
 
     func run(
-        profile: InferenceProfile,
+        profile: ModelProfile,
         prompt: String,
         imageURL: URL?,
         maxTokens: Int? = nil,
         temperature: Float? = nil,
         events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
     ) async throws -> BenchmarkRecord {
-        let promptContent = try Self.makeModelLabPromptContent(
+        let promptContent = try StudyPromptBuilder.modelLabContent(
             prompt: prompt,
             imageURL: imageURL
         )
@@ -91,12 +91,29 @@ actor LocalModelRunner {
     }
 
     func run(
-        profile: InferenceProfile,
+        profile: ModelProfile,
         promptContent: StudyPromptContent,
         maxTokens: Int? = nil,
         temperature: Float? = nil,
         events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
     ) async throws -> BenchmarkRecord {
+        let runtimePolicy = ModelRuntimePolicyProvider.policy(for: profile)
+        let request = InferenceRequest(
+            profile: profile,
+            runtimePolicy: runtimePolicy,
+            promptContent: promptContent,
+            maxTokens: maxTokens,
+            temperature: temperature
+        )
+        return try await run(request: request, events: events)
+    }
+
+    func run(
+        request: InferenceRequest,
+        events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws -> BenchmarkRecord {
+        let profile = request.profile
+        let runtimePolicy = request.runtimePolicy
         guard !isRunning else {
             throw LocalModelRunnerError.busy
         }
@@ -121,7 +138,7 @@ actor LocalModelRunner {
         await sampler.start()
 
         do {
-            Memory.cacheLimit = Self.cacheLimit(for: profile)
+            Memory.cacheLimit = runtimePolicy.cacheLimitBytes
             Memory.clearCache()
             Memory.peakMemory = 0
             mlxMemoryBefore = MLXMemorySnapshotRecord(snapshot: Memory.snapshot())
@@ -138,16 +155,16 @@ actor LocalModelRunner {
             await events(.stage(LocalModelRunnerStage.preparingPrompt))
             let preparedInput = try await Self.prepareInput(
                 container: container,
-                promptContent: promptContent,
-                profile: profile
+                promptContent: request.promptContent,
+                runtimePolicy: runtimePolicy
             )
             Memory.clearCache()
 
             try Task.checkCancellation()
             await events(.stage(LocalModelRunnerStage.generating))
-            let parameters = profile.defaults.generateParameters(
-                maxTokensOverride: maxTokens,
-                temperatureOverride: temperature
+            let parameters = runtimePolicy.generationDefaults.generateParameters(
+                maxTokensOverride: request.maxTokens,
+                temperatureOverride: request.temperature
             )
             let stream = try await container.generate(
                 input: preparedInput,
@@ -197,11 +214,11 @@ actor LocalModelRunner {
             modelID: profile.modelIdentifier,
             kind: profile.kind.rawValue,
             tier: profile.tier.rawValue,
-            prompt: promptContent.benchmarkText,
-            imageFilename: promptContent.imageFilenames.first,
-            imageFilenames: promptContent.imageFilenames,
-            includedImageCount: promptContent.includedImageCount,
-            omittedImageCount: promptContent.omittedImageCount,
+            prompt: request.promptContent.benchmarkText,
+            imageFilename: request.promptContent.imageFilenames.first,
+            imageFilenames: request.promptContent.imageFilenames,
+            includedImageCount: request.promptContent.includedImageCount,
+            omittedImageCount: request.promptContent.omittedImageCount,
             timing: BenchmarkTiming(
                 downloadSeconds: downloadSeconds,
                 loadSeconds: loadSeconds,
@@ -218,14 +235,23 @@ actor LocalModelRunner {
         )
     }
 
-    func unload() {
+    func unload() async {
         activeContainer = nil
         activeProfileID = nil
         Memory.clearCache()
     }
 
     func preload(
-        profile: InferenceProfile,
+        profile: ModelProfile,
+        events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws {
+        let runtimePolicy = ModelRuntimePolicyProvider.policy(for: profile)
+        try await preload(profile: profile, runtimePolicy: runtimePolicy, events: events)
+    }
+
+    func preload(
+        profile: ModelProfile,
+        runtimePolicy: ModelRuntimePolicy,
         events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
     ) async throws {
         while isRunning {
@@ -236,13 +262,13 @@ actor LocalModelRunner {
         isRunning = true
         defer { isRunning = false }
 
-        Memory.cacheLimit = Self.cacheLimit(for: profile)
+        Memory.cacheLimit = runtimePolicy.cacheLimitBytes
         Memory.clearCache()
         _ = try await loadContainerIfNeeded(profile: profile, events: events)
         Memory.clearCache()
     }
 
-    func clearCache() throws {
+    func clearCache() async throws {
         activeContainer = nil
         activeProfileID = nil
         Memory.clearCache()
@@ -256,7 +282,7 @@ actor LocalModelRunner {
     #endif
 
     private func loadContainerIfNeeded(
-        profile: InferenceProfile,
+        profile: ModelProfile,
         events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
     ) async throws -> LoadedContainer {
         if activeProfileID == profile.id, let activeContainer {
@@ -314,15 +340,15 @@ actor LocalModelRunner {
     nonisolated private static func prepareInput(
         container: ModelContainer,
         promptContent: StudyPromptContent,
-        profile: InferenceProfile
+        runtimePolicy: ModelRuntimePolicy
     ) async throws -> LMInput {
-        let input = try makeUserInput(promptContent: promptContent, profile: profile)
+        let input = try makeUserInput(promptContent: promptContent, runtimePolicy: runtimePolicy)
         return try await container.prepare(input: input)
     }
 
     nonisolated private static func makeUserInput(
         promptContent: StudyPromptContent,
-        profile: InferenceProfile
+        runtimePolicy: ModelRuntimePolicy
     ) throws -> UserInput {
         var chat: [Chat.Message] = []
         if !promptContent.systemInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -352,46 +378,11 @@ actor LocalModelRunner {
 
         let input = UserInput(
             chat: chat,
-            processing: UserInput.Processing(resize: profile.defaults.imageResize)
+            processing: UserInput.Processing(resize: runtimePolicy.generationDefaults.imageResize)
         )
         return input
     }
 
-    nonisolated private static func makeModelLabPromptContent(
-        prompt: String,
-        imageURL: URL?
-    ) throws -> StudyPromptContent {
-        guard let imageURL else {
-            return StudyPromptBuilder.modelLabContent(prompt: prompt, image: nil)
-        }
-
-        let granted = imageURL.startAccessingSecurityScopedResource()
-        defer {
-            if granted {
-                imageURL.stopAccessingSecurityScopedResource()
-            }
-        }
-
-        guard let image = CIImage(contentsOf: imageURL, options: [.applyOrientationProperty: true]) else {
-            throw LocalModelRunnerError.imageRequired
-        }
-
-        let documentImage = DocumentImage(
-            image: image,
-            sourceName: imageURL.lastPathComponent,
-            locator: nil,
-            caption: nil,
-            isStandalone: true,
-            originalSize: image.extent.size
-        )
-        return StudyPromptBuilder.modelLabContent(prompt: prompt, image: documentImage)
-    }
-
-    nonisolated private static func cacheLimit(for profile: InferenceProfile) -> Int {
-        profile.defaults.maxKVSize <= 2_048
-            ? 64 * 1024 * 1024
-            : 128 * 1024 * 1024
-    }
 }
 
 private struct LoadedContainer: Sendable {
@@ -399,7 +390,7 @@ private struct LoadedContainer: Sendable {
     var downloadSeconds: Double
 }
 
-private extension GenerationDefaults {
+private extension ModelRuntimeDefaults {
     func generateParameters(maxTokensOverride: Int? = nil, temperatureOverride: Float? = nil) -> GenerateParameters {
         GenerateParameters(
             maxTokens: maxTokensOverride ?? maxTokens,

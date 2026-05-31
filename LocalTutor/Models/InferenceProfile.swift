@@ -8,17 +8,21 @@ import Foundation
 import CoreGraphics
 import MLXLMCommon
 
-enum InferenceProfileKind: String, Codable, CaseIterable {
+enum ModelProfileKind: String, Codable, CaseIterable {
     case text
     case vision
 }
 
-enum InferenceTier: String, Codable, CaseIterable {
+typealias InferenceProfileKind = ModelProfileKind
+
+enum ModelTier: String, Codable, CaseIterable {
     case eightGB
     case sixteenGB
 }
 
-struct GenerationDefaults: Equatable, Sendable {
+typealias InferenceTier = ModelTier
+
+struct ModelRuntimeDefaults: Equatable, Sendable {
     var maxTokens: Int
     var temperature: Float
     var topP: Float
@@ -29,7 +33,7 @@ struct GenerationDefaults: Equatable, Sendable {
     var documentImageLimit: Int
     var minEmbeddedImageDimension: CGFloat
 
-    static let text = GenerationDefaults(
+    static let text = ModelRuntimeDefaults(
         maxTokens: 1024,
         temperature: 0.2,
         topP: 0.9,
@@ -41,7 +45,7 @@ struct GenerationDefaults: Equatable, Sendable {
         minEmbeddedImageDimension: 64
     )
 
-    static let vision = GenerationDefaults(
+    static let vision = ModelRuntimeDefaults(
         maxTokens: 1024,
         temperature: 0.2,
         topP: 0.9,
@@ -53,45 +57,47 @@ struct GenerationDefaults: Equatable, Sendable {
         minEmbeddedImageDimension: 64
     )
 
-    func withDocumentImageLimit(_ limit: Int) -> GenerationDefaults {
+    func withDocumentImageLimit(_ limit: Int) -> ModelRuntimeDefaults {
         var copy = self
         copy.documentImageLimit = limit
         return copy
     }
 
-    func withMaxKVSize(_ maxKVSize: Int) -> GenerationDefaults {
+    func withMaxKVSize(_ maxKVSize: Int) -> ModelRuntimeDefaults {
         var copy = self
         copy.maxKVSize = maxKVSize
         return copy
     }
 
-    func withMaxTokens(_ maxTokens: Int) -> GenerationDefaults {
+    func withMaxTokens(_ maxTokens: Int) -> ModelRuntimeDefaults {
         var copy = self
         copy.maxTokens = maxTokens
         return copy
     }
 
-    func withPrefillStepSize(_ prefillStepSize: Int) -> GenerationDefaults {
+    func withPrefillStepSize(_ prefillStepSize: Int) -> ModelRuntimeDefaults {
         var copy = self
         copy.prefillStepSize = prefillStepSize
         return copy
     }
 }
 
+typealias GenerationDefaults = ModelRuntimeDefaults
+
 enum ProfileModelConfiguration: Sendable {
     case llm(ModelConfiguration)
     case vlm(ModelConfiguration)
 }
 
-struct InferenceProfile: Identifiable, Sendable {
+struct ModelProfile: Identifiable, Sendable {
     let id: String
     let name: String
     let subtitle: String
     let modelIdentifier: String
-    let kind: InferenceProfileKind
-    let tier: InferenceTier
+    let kind: ModelProfileKind
+    let tier: ModelTier
     let minimumSystemMemoryBytes: UInt64
-    let defaults: GenerationDefaults
+    let defaults: ModelRuntimeDefaults
     let configuration: ProfileModelConfiguration
     var publisher: String = ""
     var summary: String = ""
@@ -113,18 +119,20 @@ struct InferenceProfile: Identifiable, Sendable {
     }
 }
 
-extension InferenceProfile {
-    static let gemma4E2B = InferenceProfileCatalog.gemma4E2B
-    static let gemma4E4B = InferenceProfileCatalog.gemma4E4B
-    static let qwen3VL4B = InferenceProfileCatalog.qwen3VL4B
-    static let v0Catalog = InferenceProfileCatalog.v0Catalog
-    static let studyCatalog = InferenceProfileCatalog.studyCatalog
+typealias InferenceProfile = ModelProfile
 
-    static func profile(withID id: String) -> InferenceProfile? {
-        InferenceProfileCatalog.profile(withID: id)
+extension ModelProfile {
+    static let gemma4E2B = ModelCatalog.gemma4E2B
+    static let gemma4E4B = ModelCatalog.gemma4E4B
+    static let qwen3VL4B = ModelCatalog.qwen3VL4B
+    static let v0Catalog = ModelCatalog.v0Catalog
+    static let studyCatalog = ModelCatalog.studyCatalog
+
+    static func profile(withID id: String) -> ModelProfile? {
+        ModelCatalog.profile(withID: id)
     }
 
-    static var recommendedDefault: InferenceProfile {
-        InferenceProfileCatalog.recommendedDefault
+    static var recommendedDefault: ModelProfile {
+        ModelCatalog.recommendedDefault
     }
 }

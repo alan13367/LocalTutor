@@ -3,6 +3,7 @@
 //  LocalTutor
 //
 
+import CoreImage
 import Foundation
 
 enum StudyPromptBuilder {
@@ -71,6 +72,33 @@ enum StudyPromptBuilder {
 
     static func prompt(for user: StudyTurnUser, history: [StudyTurn], extracted: [ExtractedSource]) -> String {
         content(for: user, history: history, extracted: extracted).benchmarkText
+    }
+
+    static func modelLabContent(prompt: String, imageURL: URL?) throws -> StudyPromptContent {
+        guard let imageURL else {
+            return modelLabContent(prompt: prompt, image: nil)
+        }
+
+        let granted = imageURL.startAccessingSecurityScopedResource()
+        defer {
+            if granted {
+                imageURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        guard let image = CIImage(contentsOf: imageURL, options: [.applyOrientationProperty: true]) else {
+            throw LocalModelRunnerError.imageRequired
+        }
+
+        let documentImage = DocumentImage(
+            image: image,
+            sourceName: imageURL.lastPathComponent,
+            locator: nil,
+            caption: nil,
+            isStandalone: true,
+            originalSize: image.extent.size
+        )
+        return modelLabContent(prompt: prompt, image: documentImage)
     }
 
     static func modelLabContent(prompt: String, image: DocumentImage?) -> StudyPromptContent {

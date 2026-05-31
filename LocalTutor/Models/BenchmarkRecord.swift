@@ -131,7 +131,7 @@ struct BenchmarkRecord: Codable, Identifiable, Equatable, Sendable {
         self.output = output
     }
 
-    static func skipped(profile: InferenceProfile, prompt: String, imageFilename: String?, reason: String) -> BenchmarkRecord {
+    static func skipped(profile: ModelProfile, prompt: String, imageFilename: String?, reason: String) -> BenchmarkRecord {
         let now = Date()
         return BenchmarkRecord(
             schemaVersion: schemaVersion,

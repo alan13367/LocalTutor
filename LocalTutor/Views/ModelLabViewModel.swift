@@ -10,8 +10,8 @@ import SwiftUI
 
 @MainActor
 final class ModelLabViewModel: ObservableObject {
-    @Published var profiles = InferenceProfile.v0Catalog
-    @Published var selectedProfileID = InferenceProfile.recommendedDefault.id
+    @Published var profiles = ModelProfile.v0Catalog
+    @Published var selectedProfileID = ModelProfile.recommendedDefault.id
     @Published var prompt = """
     You are LocalTutor. Explain the attached material or prompt like a careful tutor, then list the most important facts a student should remember.
     """
@@ -25,22 +25,27 @@ final class ModelLabViewModel: ObservableObject {
     @Published var latestRecordURL: URL?
     @Published var errorMessage: String?
 
-    private let runner: LocalModelRunner
+    private let inferenceService: any InferenceService
     private let store: BenchmarkStore
     private var runTask: Task<Void, Never>?
     private var downloadPhaseHasEnded = false
 
-    init(runner: LocalModelRunner = LocalModelRunner(), store: BenchmarkStore = BenchmarkStore()) {
-        self.runner = runner
+    init(inferenceService: any InferenceService = LocalModelRunner(), store: BenchmarkStore = BenchmarkStore()) {
+        self.inferenceService = inferenceService
         self.store = store
     }
 
-    var selectedProfile: InferenceProfile {
+    convenience init(runner: LocalModelRunner, store: BenchmarkStore = BenchmarkStore()) {
+        self.init(inferenceService: runner, store: store)
+    }
+
+    var selectedProfile: ModelProfile {
         profiles.first { $0.id == selectedProfileID } ?? profiles[0]
     }
 
     var currentPreflight: MemoryPreflightResult {
-        MemoryPreflight.evaluate(profile: selectedProfile)
+        let runtimePolicy = ModelRuntimePolicyProvider.policy(for: selectedProfile)
+        return MemoryPreflight.evaluate(policy: runtimePolicy)
     }
 
     var canRun: Bool {
@@ -62,9 +67,10 @@ final class ModelLabViewModel: ObservableObject {
         }
 
         let profile = selectedProfile
+        let runtimePolicy = ModelRuntimePolicyProvider.policy(for: profile)
         let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let imageURL = selectedImageURL
-        let preflight = MemoryPreflight.evaluate(profile: profile)
+        let preflight = MemoryPreflight.evaluate(policy: runtimePolicy)
 
         output = ""
         latestRecord = nil
@@ -94,11 +100,16 @@ final class ModelLabViewModel: ObservableObject {
             guard let self else { return }
 
             do {
-                let record = try await runner.run(
-                    profile: profile,
+                let promptContent = try StudyPromptBuilder.modelLabContent(
                     prompt: prompt,
                     imageURL: imageURL
-                ) { [weak self] event in
+                )
+                let request = InferenceRequest(
+                    profile: profile,
+                    runtimePolicy: runtimePolicy,
+                    promptContent: promptContent
+                )
+                let record = try await inferenceService.run(request: request) { [weak self] event in
                     await self?.handle(event)
                 }
                 await finish(record: record, status: statusMessage(for: record))
@@ -121,7 +132,7 @@ final class ModelLabViewModel: ObservableObject {
 
     func unloadModel() {
         Task {
-            await runner.unload()
+            await inferenceService.unload()
             await MainActor.run {
                 statusMessage = "Model unloaded"
                 downloadProgress = nil
@@ -134,7 +145,7 @@ final class ModelLabViewModel: ObservableObject {
     func clearCache() {
         Task {
             do {
-                try await runner.clearCache()
+                try await inferenceService.clearCache()
                 await MainActor.run {
                     statusMessage = "Model cache cleared"
                     downloadProgress = nil

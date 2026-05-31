@@ -41,7 +41,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
 
     @AppStorage(AppStorageKeys.selectedProfileID) private var storedProfileID: String = ""
 
-    private let runner: LocalModelRunner
+    private let inferenceService: any InferenceService
     private let store = SessionStore()
     private var runTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
@@ -55,9 +55,13 @@ final class StudyWorkspaceViewModel: ObservableObject {
     private var pendingChunks: String = ""
     private var flushScheduled = false
 
-    init(runner: LocalModelRunner = LocalModelRunner()) {
-        self.runner = runner
+    init(inferenceService: any InferenceService = LocalModelRunner()) {
+        self.inferenceService = inferenceService
         bootstrap()
+    }
+
+    convenience init(runner: LocalModelRunner) {
+        self.init(inferenceService: runner)
     }
 
     private func bootstrap() {
@@ -161,15 +165,15 @@ final class StudyWorkspaceViewModel: ObservableObject {
 
     // MARK: - Profiles
 
-    var activeProfile: InferenceProfile {
-        if let profile = InferenceProfile.profile(withID: storedProfileID),
+    var activeProfile: ModelProfile {
+        if let profile = ModelProfile.profile(withID: storedProfileID),
            MemoryPreflight.evaluate(profile: profile).canRun {
             return profile
         }
-        return InferenceProfile.recommendedDefault
+        return ModelProfile.recommendedDefault
     }
 
-    func setActiveProfile(_ profile: InferenceProfile) {
+    func setActiveProfile(_ profile: ModelProfile) {
         storedProfileID = profile.id
         startModelPreload(for: profile)
         objectWillChange.send()
@@ -181,8 +185,9 @@ final class StudyWorkspaceViewModel: ObservableObject {
         modelDownloadStatus = nil
     }
 
-    private func startModelPreload(for profile: InferenceProfile) {
-        guard MemoryPreflight.evaluate(profile: profile).canRun else {
+    private func startModelPreload(for profile: ModelProfile) {
+        let runtimePolicy = ModelRuntimePolicyProvider.policy(for: profile)
+        guard MemoryPreflight.evaluate(policy: runtimePolicy).canRun else {
             return
         }
         if modelPreloadProfileID == profile.id, modelPreloadTask != nil {
@@ -201,10 +206,10 @@ final class StudyWorkspaceViewModel: ObservableObject {
             phase: .checking
         )
 
-        let runner = runner
+        let inferenceService = inferenceService
         modelPreloadTask = Task { [weak self] in
             do {
-                try await runner.preload(profile: profile) { [weak self] event in
+                try await inferenceService.preload(profile: profile, runtimePolicy: runtimePolicy) { [weak self] event in
                     await self?.handleModelLoad(event, profile: profile)
                 }
                 await MainActor.run {
@@ -224,7 +229,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
         }
     }
 
-    private func waitForModelPreloadIfNeeded(profile: InferenceProfile, turnID: UUID) async throws {
+    private func waitForModelPreloadIfNeeded(profile: ModelProfile, turnID: UUID) async throws {
         guard modelPreloadProfileID == profile.id, let task = modelPreloadTask else {
             return
         }
@@ -234,7 +239,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
         try Task.checkCancellation()
     }
 
-    private func handleModelLoad(_ event: LocalModelRunnerEvent, profile: InferenceProfile) {
+    private func handleModelLoad(_ event: LocalModelRunnerEvent, profile: ModelProfile) {
         switch event {
         case .stage(let message):
             if message == LocalModelRunnerStage.checkingModelCache() {
@@ -262,7 +267,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
     }
 
     private func updateModelDownloadStatus(
-        for profile: InferenceProfile,
+        for profile: ModelProfile,
         message: String,
         fraction: Double?,
         phase: ModelDownloadPhase
@@ -278,12 +283,12 @@ final class StudyWorkspaceViewModel: ObservableObject {
         )
     }
 
-    private func completeModelPreload(for profile: InferenceProfile) {
+    private func completeModelPreload(for profile: ModelProfile) {
         markModelReady(for: profile)
         clearModelPreloadIfCurrent(profile)
     }
 
-    private func markModelReady(for profile: InferenceProfile) {
+    private func markModelReady(for profile: ModelProfile) {
         guard modelDownloadStatus?.profileID == profile.id || modelPreloadProfileID == profile.id else {
             return
         }
@@ -297,7 +302,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
         scheduleModelDownloadDismiss()
     }
 
-    private func failModelPreload(for profile: InferenceProfile, error: Error) {
+    private func failModelPreload(for profile: ModelProfile, error: Error) {
         clearModelPreloadIfCurrent(profile)
         modelDownloadStatus = ModelDownloadStatus(
             profileID: profile.id,
@@ -308,7 +313,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
         )
     }
 
-    private func clearModelPreloadIfCurrent(_ profile: InferenceProfile) {
+    private func clearModelPreloadIfCurrent(_ profile: ModelProfile) {
         guard modelPreloadProfileID == profile.id else { return }
         modelPreloadProfileID = nil
         modelPreloadTask = nil
@@ -485,7 +490,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
 
     func unloadModel() {
         Task {
-            await runner.unload()
+            await inferenceService.unload()
         }
     }
 
@@ -493,7 +498,8 @@ final class StudyWorkspaceViewModel: ObservableObject {
 
     private func startTurn(user: StudyTurnUser) {
         let profile = activeProfile
-        let preflight = MemoryPreflight.evaluate(profile: profile)
+        let runtimePolicy = ModelRuntimePolicyProvider.policy(for: profile)
+        let preflight = MemoryPreflight.evaluate(policy: runtimePolicy)
         guard preflight.canRun else {
             globalError = preflight.message
             return
@@ -521,14 +527,17 @@ final class StudyWorkspaceViewModel: ObservableObject {
                     for: user,
                     history: history,
                     profile: profile,
+                    runtimePolicy: runtimePolicy,
                     generateIntermediate: { [weak self] content, maxTokens, temperature in
                         guard let self else { throw CancellationError() }
-                        let record = try await self.runner.run(
+                        let request = InferenceRequest(
                             profile: profile,
+                            runtimePolicy: runtimePolicy,
                             promptContent: content,
                             maxTokens: maxTokens,
                             temperature: temperature
-                        ) { [weak self] event in
+                        )
+                        let record = try await self.inferenceService.run(request: request) { [weak self] event in
                             await self?.handleIntermediate(event, turnID: turnID)
                             await self?.handleModelLoad(event, profile: profile)
                         }
@@ -556,12 +565,14 @@ final class StudyWorkspaceViewModel: ObservableObject {
                     self.updateStatusIfStreaming(turnID: turnID, message: figureText)
                 }
 
-                let record = try await self.runner.run(
+                let request = InferenceRequest(
                     profile: profile,
+                    runtimePolicy: runtimePolicy,
                     promptContent: promptContent,
                     maxTokens: maxTokens,
                     temperature: temperature
-                ) { [weak self] event in
+                )
+                let record = try await self.inferenceService.run(request: request) { [weak self] event in
                     await self?.handle(event, turnID: turnID, kind: user.resourceKind)
                     await self?.handleModelLoad(event, profile: profile)
                 }

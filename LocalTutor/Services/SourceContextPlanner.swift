@@ -23,13 +23,32 @@ enum SourceContextPlanner {
     static func content(
         for user: StudyTurnUser,
         history: [StudyTurn],
-        profile: InferenceProfile,
+        profile: ModelProfile,
+        generateIntermediate: IntermediateGenerator?,
+        status: StatusHandler
+    ) async throws -> StudyPromptContent {
+        let runtimePolicy = ModelRuntimePolicyProvider.policy(for: profile)
+        return try await content(
+            for: user,
+            history: history,
+            profile: profile,
+            runtimePolicy: runtimePolicy,
+            generateIntermediate: generateIntermediate,
+            status: status
+        )
+    }
+
+    static func content(
+        for user: StudyTurnUser,
+        history: [StudyTurn],
+        profile: ModelProfile,
+        runtimePolicy: ModelRuntimePolicy,
         generateIntermediate: IntermediateGenerator?,
         status: StatusHandler
     ) async throws -> StudyPromptContent {
         await status("Indexing sources")
-        let prepared = await prepareSources(user.sources, profile: profile)
-        let budget = PromptPacker.promptBudget(for: profile, resourceKind: user.resourceKind)
+        let prepared = await prepareSources(user.sources, runtimePolicy: runtimePolicy)
+        let budget = PromptPacker.promptBudget(for: runtimePolicy, resourceKind: user.resourceKind)
         let chunks = prepared.indexes.flatMap(\.chunks).sorted { lhs, rhs in
             if lhs.sourceName == rhs.sourceName { return lhs.ordinal < rhs.ordinal }
             return lhs.sourceName < rhs.sourceName
@@ -136,11 +155,11 @@ enum SourceContextPlanner {
 
     private static func prepareSources(
         _ sources: [StudySource],
-        profile: InferenceProfile
+        runtimePolicy: ModelRuntimePolicy
     ) async -> (indexes: [SourceIndex], visualExtracted: [ExtractedSource]) {
         var indexes: [SourceIndex] = []
         var visualExtracted: [ExtractedSource] = []
-        var remainingImages = profile.supportsVision ? profile.defaults.documentImageLimit : 0
+        var remainingImages = runtimePolicy.documentImageLimit
 
         for source in sources {
             let cached = await SourceIndexStore.shared.cachedIndex(for: source)
@@ -151,11 +170,7 @@ enum SourceContextPlanner {
             let needsExtraction = cached == nil || remainingImages > 0 || source.isImage
             guard needsExtraction else { continue }
 
-            let options = SourceExtractionOptions(
-                imageLimit: remainingImages,
-                imageResize: profile.defaults.imageResize,
-                minEmbeddedImageDimension: profile.defaults.minEmbeddedImageDimension
-            )
+            let options = runtimePolicy.extractionOptions(imageLimit: remainingImages)
             let extracted = await SourceExtractor.extract([source], options: options).first
                 ?? ExtractedSource(source: source, blocks: [], failureReason: "No content was extracted.")
             remainingImages = max(0, remainingImages - extracted.includedImageCount)
@@ -176,7 +191,7 @@ enum SourceContextPlanner {
     private static func wholeDocumentContext(
         user: StudyTurnUser,
         history: [StudyTurn],
-        profile: InferenceProfile,
+        profile: ModelProfile,
         chunks: [SourceChunk],
         visualExtracted: [ExtractedSource],
         budget: Int,
@@ -244,7 +259,7 @@ enum SourceContextPlanner {
     private static func targetedContext(
         user: StudyTurnUser,
         history: [StudyTurn],
-        profile: InferenceProfile,
+        profile: ModelProfile,
         chunks: [SourceChunk],
         indexes: [SourceIndex],
         visualExtracted: [ExtractedSource],
@@ -290,7 +305,7 @@ enum SourceContextPlanner {
     private static func distillToFit(
         user: StudyTurnUser,
         history: [StudyTurn],
-        profile: InferenceProfile,
+        profile: ModelProfile,
         chunks: [SourceChunk],
         budget: Int,
         generateIntermediate: IntermediateGenerator,
@@ -339,7 +354,7 @@ enum SourceContextPlanner {
     private static func distill(
         user: StudyTurnUser,
         history: [StudyTurn],
-        profile: InferenceProfile,
+        profile: ModelProfile,
         chunks: [SourceChunk],
         budget: Int,
         preserveSections: Bool,
@@ -390,7 +405,7 @@ enum SourceContextPlanner {
     private static func intermediatePrompt(
         user: StudyTurnUser,
         history: [StudyTurn],
-        profile: InferenceProfile,
+        profile: ModelProfile,
         chunks: [SourceChunk],
         index: Int,
         total: Int,

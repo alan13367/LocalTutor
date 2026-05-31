@@ -6,8 +6,8 @@
 import Foundation
 import MLXVLM
 
-enum InferenceProfileCatalog {
-    static let gemma4E2B = InferenceProfile(
+enum ModelCatalog {
+    static let gemma4E2B = ModelProfile(
         id: "gemma4E2B",
         name: "Gemma 4 E2B",
         subtitle: "8GB baseline, text and vision capable",
@@ -24,7 +24,7 @@ enum InferenceProfileCatalog {
         isRecommended: true
     )
 
-    static let gemma4E4B = InferenceProfile(
+    static let gemma4E4B = ModelProfile(
         id: "gemma4E4B",
         name: "Gemma 4 E4B",
         subtitle: "16GB tier, stronger multimodal reasoning",
@@ -32,7 +32,7 @@ enum InferenceProfileCatalog {
         kind: .vision,
         tier: .sixteenGB,
         minimumSystemMemoryBytes: 16.gibibytes,
-        defaults: GenerationDefaults.vision
+        defaults: ModelRuntimeDefaults.vision
             .withDocumentImageLimit(4)
             .withMaxTokens(512)
             .withMaxKVSize(2_048)
@@ -45,7 +45,7 @@ enum InferenceProfileCatalog {
         isRecommended: true
     )
 
-    static let qwen3VL4B = InferenceProfile(
+    static let qwen3VL4B = ModelProfile(
         id: "qwen3VL4B",
         name: "Qwen3-VL 4B",
         subtitle: "Alibaba multimodal, sharp at diagrams and text",
@@ -53,7 +53,7 @@ enum InferenceProfileCatalog {
         kind: .vision,
         tier: .sixteenGB,
         minimumSystemMemoryBytes: 16.gibibytes,
-        defaults: GenerationDefaults.vision
+        defaults: ModelRuntimeDefaults.vision
             .withDocumentImageLimit(4)
             .withMaxTokens(512)
             .withMaxKVSize(2_048)
@@ -66,24 +66,26 @@ enum InferenceProfileCatalog {
     )
 
     /// The original v0 catalog. Retained so existing tests keep passing.
-    static let v0Catalog: [InferenceProfile] = [
+    static let v0Catalog: [ModelProfile] = [
         gemma4E2B,
         gemma4E4B
     ]
 
     /// Full curated catalog shown in Settings. All entries are vision-capable, MLX-format,
     /// and gated by minimum unified-memory tier.
-    static let studyCatalog: [InferenceProfile] = [
+    static let studyCatalog: [ModelProfile] = [
         gemma4E2B,
         gemma4E4B,
         qwen3VL4B
     ]
 
-    static func profile(withID id: String) -> InferenceProfile? {
+    static func profile(withID id: String) -> ModelProfile? {
         studyCatalog.first { $0.id == id }
     }
 
-    static var recommendedDefault: InferenceProfile {
+    static var recommendedDefault: ModelProfile {
         ProcessInfo.processInfo.physicalMemory >= 16.gibibytes ? gemma4E4B : gemma4E2B
     }
 }
+
+typealias InferenceProfileCatalog = ModelCatalog

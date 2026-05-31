@@ -11,7 +11,7 @@ import Testing
 struct BenchmarkRecordTests {
     @Test
     func benchmarkRecordRoundTripsAsSchemaVersionTwo() throws {
-        let profile = InferenceProfile.gemma4E2B
+        let profile = ModelProfile.gemma4E2B
         let record = BenchmarkRecord.skipped(
             profile: profile,
             prompt: "Explain subnet masks.",

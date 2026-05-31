@@ -203,15 +203,13 @@ enum SourceRetriever {
 }
 
 enum PromptPacker {
-    static func promptBudget(for profile: InferenceProfile, resourceKind: StudyResourceKind) -> Int {
-        let outputReserve = min(
-            resourceKind.isInteractive ? 1_024 : profile.defaults.maxTokens,
-            max(256, profile.defaults.maxKVSize / 3)
-        )
-        let instructionReserve = min(900, max(500, profile.defaults.maxKVSize / 4))
-        let rawBudget = profile.defaults.maxKVSize - outputReserve - instructionReserve
-        let sourceBudgetCap = max(256, profile.defaults.maxKVSize / 3)
-        return max(256, min(rawBudget, sourceBudgetCap))
+    static func promptBudget(for profile: ModelProfile, resourceKind: StudyResourceKind) -> Int {
+        let policy = ModelRuntimePolicyProvider.policy(for: profile)
+        return promptBudget(for: policy, resourceKind: resourceKind)
+    }
+
+    static func promptBudget(for runtimePolicy: ModelRuntimePolicy, resourceKind: StudyResourceKind) -> Int {
+        runtimePolicy.sourceTokenBudget(for: resourceKind)
     }
 
     static func canPreserveCoverage(_ chunks: [SourceChunk], budget: Int) -> Bool {

@@ -53,7 +53,7 @@ struct SourceExtractionOptions: Sendable, Equatable {
     var imageResize: CGSize?
     var minEmbeddedImageDimension: CGFloat
 
-    static func defaults(for defaults: GenerationDefaults) -> SourceExtractionOptions {
+    static func defaults(for defaults: ModelRuntimeDefaults) -> SourceExtractionOptions {
         SourceExtractionOptions(
             imageLimit: defaults.documentImageLimit,
             imageResize: defaults.imageResize,

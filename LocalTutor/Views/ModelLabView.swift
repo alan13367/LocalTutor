@@ -278,7 +278,7 @@ struct ModelLabView: View {
 }
 
 private struct ProfileRow: View {
-    var profile: InferenceProfile
+    var profile: ModelProfile
 
     var body: some View {
         Label {

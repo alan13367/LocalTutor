@@ -15,18 +15,23 @@ struct MemoryPreflightResult: Equatable, Sendable {
 }
 
 enum MemoryPreflight {
-    static func evaluate(profile: InferenceProfile, systemMemoryBytes: UInt64 = SystemMemory.totalBytes()) -> MemoryPreflightResult {
-        let requiredBytes = profile.minimumSystemMemoryBytes
-        let canRun = systemMemoryBytes >= requiredBytes
-        let systemMemory = ByteCountFormatter.localTutorMemoryString(fromByteCount: Int64(systemMemoryBytes))
+    static func evaluate(profile: ModelProfile, systemMemoryBytes: UInt64 = SystemMemory.totalBytes()) -> MemoryPreflightResult {
+        let policy = ModelRuntimePolicyProvider.policy(for: profile, systemMemoryBytes: systemMemoryBytes)
+        return evaluate(policy: policy)
+    }
+
+    static func evaluate(policy: ModelRuntimePolicy) -> MemoryPreflightResult {
+        let requiredBytes = policy.minimumSystemMemoryBytes
+        let canRun = policy.systemMemoryBytes >= requiredBytes
+        let systemMemory = ByteCountFormatter.localTutorMemoryString(fromByteCount: Int64(policy.systemMemoryBytes))
         let required = ByteCountFormatter.localTutorMemoryString(fromByteCount: Int64(requiredBytes))
         let message = canRun
             ? "System memory \(systemMemory) meets \(required) requirement."
-            : "Not enough system memory for \(profile.name). This Mac has \(systemMemory), requires \(required)."
+            : "Not enough system memory for \(policy.profileName). This Mac has \(systemMemory), requires \(required)."
 
         return MemoryPreflightResult(
             canRun: canRun,
-            systemMemoryBytes: systemMemoryBytes,
+            systemMemoryBytes: policy.systemMemoryBytes,
             requiredBytes: requiredBytes,
             message: message
         )
