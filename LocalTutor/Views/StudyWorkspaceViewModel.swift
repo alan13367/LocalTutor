@@ -361,6 +361,10 @@ final class StudyWorkspaceViewModel: ObservableObject {
         return hasText
     }
 
+    var shouldShowFirstTurnSourcePreview: Bool {
+        !sources.isEmpty && turns.isEmpty
+    }
+
     var sourceSummary: String {
         if sources.isEmpty {
             return "No sources"

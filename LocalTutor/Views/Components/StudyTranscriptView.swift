@@ -11,33 +11,54 @@ struct StudyTranscriptView: View {
     @ObservedObject var viewModel: StudyWorkspaceViewModel
     var onAttach: () -> Void
 
+    @ViewBuilder
     var body: some View {
+        if viewModel.turns.isEmpty {
+            emptyTranscript
+        } else {
+            transcriptScroll
+        }
+    }
+
+    @ViewBuilder
+    private var emptyTranscript: some View {
+        if viewModel.shouldShowFirstTurnSourcePreview {
+            AttachedSourcesEmptyState(viewModel: viewModel, onAttach: onAttach)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 24)
+                .frame(maxWidth: 920)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+        } else {
+            EmptyStateHero(viewModel: viewModel, onAttach: onAttach)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 24)
+                .frame(maxWidth: 920)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        }
+    }
+
+    private var transcriptScroll: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
-                    if viewModel.turns.isEmpty {
-                        EmptyStateHero(viewModel: viewModel, onAttach: onAttach)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 40)
-                    } else {
-                        ForEach(viewModel.turns) { turn in
-                            StudyArtifactCard(
-                                turn: turn,
-                                onRegenerate: { viewModel.regenerate(turn: turn) },
-                                onCopy: { copy(turn.assistant.markdown) },
-                                onExport: { export(turn) }
-                            )
-                            .id(turn.id)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        }
+                    ForEach(viewModel.turns) { turn in
+                        StudyArtifactCard(
+                            turn: turn,
+                            onRegenerate: { viewModel.regenerate(turn: turn) },
+                            onCopy: { copy(turn.assistant.markdown) },
+                            onExport: { export(turn) }
+                        )
+                        .id(turn.id)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
 
-                        if !viewModel.refinementSuggestions.isEmpty {
-                            RefinementChips(suggestions: viewModel.refinementSuggestions) { suggestion in
-                                viewModel.refine(with: suggestion)
-                            }
-                            .padding(.top, 4)
-                            .id("refinements")
+                    if !viewModel.refinementSuggestions.isEmpty {
+                        RefinementChips(suggestions: viewModel.refinementSuggestions) { suggestion in
+                            viewModel.refine(with: suggestion)
                         }
+                        .padding(.top, 4)
+                        .id("refinements")
                     }
 
                     Color.clear.frame(height: 8).id("bottom")
@@ -80,6 +101,132 @@ struct StudyTranscriptView: View {
     }
 }
 
+private struct AttachedSourcesEmptyState: View {
+    @ObservedObject var viewModel: StudyWorkspaceViewModel
+    var onAttach: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            VStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.13))
+                        .frame(width: 76, height: 76)
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+
+                VStack(spacing: 6) {
+                    Text("\(viewModel.sources.count) source\(viewModel.sources.count == 1 ? "" : "s") ready")
+                        .font(.title.weight(.semibold))
+                    Text("Ask a question, get a clean summary, or turn them into practice.")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+            }
+
+            FirstTurnSourcesPreview(
+                sources: viewModel.sources,
+                onAttach: onAttach,
+                onRemove: viewModel.removeSource
+            )
+        }
+        .padding(.horizontal, 12)
+    }
+}
+
+private struct FirstTurnSourcesPreview: View {
+    let sources: [StudySource]
+    var onAttach: () -> Void
+    var onRemove: (StudySource) -> Void
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 210, maximum: 250), spacing: 10)
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.14))
+                        .frame(width: 38, height: 38)
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Attached sources")
+                        .font(.headline)
+                    Text(fileCountLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button(action: onAttach) {
+                    Image(systemName: "paperclip.badge.plus")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Attach more files")
+            }
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                ForEach(sources) { source in
+                    SourceChip(source: source) {
+                        onRemove(source)
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: 760, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.regularMaterial)
+                .shadow(color: Color.black.opacity(0.12), radius: 22, x: 0, y: 12)
+        )
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.accentColor.opacity(0.12),
+                            Color.primary.opacity(0.03)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.accentColor.opacity(0.26),
+                            Color.primary.opacity(0.08)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.6
+                )
+        )
+    }
+
+    private var fileCountLabel: String {
+        "\(sources.count) file\(sources.count == 1 ? "" : "s")"
+    }
+}
+
 struct EmptyStateHero: View {
     @ObservedObject var viewModel: StudyWorkspaceViewModel
     var onAttach: () -> Void
@@ -104,17 +251,8 @@ struct EmptyStateHero: View {
             }
             .padding(.top, 8)
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
-                ForEach(StudyExamplePrompt.starter) { example in
-                    Button {
-                        viewModel.applyExample(example)
-                    } label: {
-                        ExampleTile(example: example)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 8)
+            StarterActionsGrid(viewModel: viewModel)
+                .padding(.horizontal, 8)
 
             HStack(spacing: 10) {
                 Image(systemName: "tray.and.arrow.down")
@@ -132,6 +270,23 @@ struct EmptyStateHero: View {
             )
         }
         .padding(.horizontal, 12)
+    }
+}
+
+private struct StarterActionsGrid: View {
+    @ObservedObject var viewModel: StudyWorkspaceViewModel
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+            ForEach(StudyExamplePrompt.starter) { example in
+                Button {
+                    viewModel.applyExample(example)
+                } label: {
+                    ExampleTile(example: example)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
 

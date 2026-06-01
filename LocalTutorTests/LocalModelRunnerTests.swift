@@ -9,6 +9,31 @@ import Testing
 @testable import LocalTutor
 
 struct LocalModelRunnerTests {
+    @MainActor
+    @Test
+    func firstTurnSourcePreviewOnlyShowsForEmptySessionsWithSources() {
+        let viewModel = StudyWorkspaceViewModel()
+        let sessionID = viewModel.currentSessionID
+        let sourceURL = FileManager.default.temporaryDirectory.appendingPathComponent("LocalTutorPreviewTest.md")
+        try? "Preview test notes".write(to: sourceURL, atomically: true, encoding: .utf8)
+        let source = StudySource(url: sourceURL)
+
+        viewModel.currentSession = StudySession(id: sessionID, sources: [], turns: [])
+        #expect(viewModel.shouldShowFirstTurnSourcePreview == false)
+
+        viewModel.currentSession = StudySession(id: sessionID, sources: [source], turns: [])
+        #expect(viewModel.shouldShowFirstTurnSourcePreview == true)
+
+        let user = StudyTurnUser(
+            focus: "What should I study?",
+            resourceKind: .ask,
+            sources: [source],
+            isRefinement: false
+        )
+        viewModel.currentSession = StudySession(id: sessionID, sources: [source], turns: [StudyTurn(user: user)])
+        #expect(viewModel.shouldShowFirstTurnSourcePreview == false)
+    }
+
     @Test
     func runnerRefusesConcurrentRuns() async {
         let runner = LocalModelRunner()
