@@ -88,7 +88,8 @@ enum SourceContextPlanner {
         return StudyPromptBuilder.content(
             for: user,
             history: history,
-            sourceContext: context
+            sourceContext: context,
+            supportsVision: runtimePolicy.supportsVision
         )
     }
 
@@ -170,6 +171,19 @@ enum SourceContextPlanner {
         for (index, source) in sources.enumerated() {
             try Task.checkCancellation()
             await status("Reading source \(index + 1) of \(sources.count): \(statusName(for: source))")
+            if source.isImage && !runtimePolicy.supportsVision {
+                visualExtracted.append(
+                    ExtractedSource(
+                        source: source,
+                        blocks: [],
+                        failureReason: nil,
+                        warnings: ["\(source.displayName) was skipped because \(runtimePolicy.profileName) is text-only. Switch to a vision model to study images."],
+                        omittedImageCount: 1
+                    )
+                )
+                continue
+            }
+
             let cached = await SourceIndexStore.shared.cachedIndex(for: source)
             if let cached {
                 indexes.append(cached.rebased(to: source))
@@ -217,7 +231,8 @@ enum SourceContextPlanner {
                 title: "No readable source text was found.",
                 chunks: [],
                 visualExtracted: visualExtracted,
-                omittedTextChunkCount: 0
+                omittedTextChunkCount: 0,
+                supportsVision: profile.supportsVision
             )
         }
 
@@ -226,7 +241,8 @@ enum SourceContextPlanner {
                 title: "Full source contents selected.",
                 chunks: chunks,
                 visualExtracted: visualExtracted,
-                omittedTextChunkCount: 0
+                omittedTextChunkCount: 0,
+                supportsVision: profile.supportsVision
             )
         }
 
@@ -237,6 +253,7 @@ enum SourceContextPlanner {
                 chunks: packed.chunks,
                 visualExtracted: visualExtracted,
                 omittedTextChunkCount: 0,
+                supportsVision: profile.supportsVision,
                 extraWarnings: packed.compactedChunkCount == 0 ? [] : [
                     "\(packed.compactedChunkCount) source chunk\(packed.compactedChunkCount == 1 ? "" : "s") were compacted proportionally to keep the whole document in one model call."
                 ]
@@ -251,6 +268,7 @@ enum SourceContextPlanner {
                 chunks: packed.chunks,
                 visualExtracted: visualExtracted,
                 omittedTextChunkCount: packed.omitted,
+                supportsVision: profile.supportsVision,
                 extraWarnings: [
                     "LocalTutor used a fast overview instead of \(groups.count) intermediate summarization passes. Ask a targeted question for more detail on a specific source or section."
                 ]
@@ -263,7 +281,8 @@ enum SourceContextPlanner {
                 title: "Retrieved source excerpts selected.",
                 chunks: packed.chunks,
                 visualExtracted: visualExtracted,
-                omittedTextChunkCount: packed.omitted
+                omittedTextChunkCount: packed.omitted,
+                supportsVision: profile.supportsVision
             )
         }
 
@@ -280,7 +299,8 @@ enum SourceContextPlanner {
             title: "Distilled full-document source summaries selected.",
             chunks: distilled,
             visualExtracted: visualExtracted,
-            omittedTextChunkCount: 0
+            omittedTextChunkCount: 0,
+            supportsVision: profile.supportsVision
         )
     }
 
@@ -317,7 +337,8 @@ enum SourceContextPlanner {
                 title: "Distilled \(retrieval.matchedHeading ?? "section") source summaries selected.",
                 chunks: distilled,
                 visualExtracted: visualExtracted,
-                omittedTextChunkCount: 0
+                omittedTextChunkCount: 0,
+                supportsVision: profile.supportsVision
             )
         }
 
@@ -326,7 +347,8 @@ enum SourceContextPlanner {
             title: retrieval.matchedHeading.map { "Retrieved section: \($0)" } ?? "Retrieved relevant source excerpts.",
             chunks: packed.chunks,
             visualExtracted: visualExtracted,
-            omittedTextChunkCount: packed.omitted
+            omittedTextChunkCount: packed.omitted,
+            supportsVision: profile.supportsVision
         )
     }
 
@@ -407,7 +429,7 @@ enum SourceContextPlanner {
                 total: groups.count,
                 maxSummaryTokens: maxSummaryTokens
             )
-            let output = try await generateIntermediate(prompt, maxSummaryTokens, 0.1)
+            let output = try await generateIntermediate(prompt, nil, 0.1)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !output.isEmpty else {
                 throw SourceContextPlannerError.intermediateFailed("The local model returned an empty source summary.")
@@ -443,7 +465,8 @@ enum SourceContextPlanner {
             title: "Source section \(index + 1) of \(total) selected for intermediate distillation.",
             chunks: chunks,
             visualExtracted: [],
-            omittedTextChunkCount: 0
+            omittedTextChunkCount: 0,
+            supportsVision: profile.supportsVision
         )
         let focus = user.focus.trimmingCharacters(in: .whitespacesAndNewlines)
         let goal = focus.isEmpty
@@ -451,7 +474,7 @@ enum SourceContextPlanner {
             : "Create source-grounded study notes relevant to: \(focus)"
 
         return StudyPromptContent(
-            systemInstruction: "You are LocalTutor, a private local study tutor running on the student's Mac.",
+            systemInstruction: StudyPromptBuilder.systemInstruction,
             openingText: """
             Intermediate source distillation.
             \(goal)

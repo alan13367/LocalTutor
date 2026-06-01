@@ -7,13 +7,26 @@ import CoreImage
 import Foundation
 
 enum StudyPromptBuilder {
+    static let systemInstruction = """
+    You are LocalTutor, a private local study tutor running on the student's Mac. If this model emits a <think> block, keep internal thinking inside that block, close it, then always write the final answer after it. Do not mix hidden reasoning into the final answer.
+    """
+
     static func content(
         for user: StudyTurnUser,
         history: [StudyTurn],
         extracted: [ExtractedSource]
     ) -> StudyPromptContent {
-        let context = sourceContext(from: extracted, hasSources: !user.sources.isEmpty)
-        return content(for: user, history: history, sourceContext: context)
+        content(for: user, history: history, extracted: extracted, supportsVision: true)
+    }
+
+    static func content(
+        for user: StudyTurnUser,
+        history: [StudyTurn],
+        extracted: [ExtractedSource],
+        supportsVision: Bool
+    ) -> StudyPromptContent {
+        let context = sourceContext(from: extracted, hasSources: !user.sources.isEmpty, supportsVision: supportsVision)
+        return content(for: user, history: history, sourceContext: context, supportsVision: supportsVision)
     }
 
     static func content(
@@ -21,13 +34,31 @@ enum StudyPromptBuilder {
         history: [StudyTurn],
         sourceContext: SourcePromptContext
     ) -> StudyPromptContent {
+        content(for: user, history: history, sourceContext: sourceContext, supportsVision: true)
+    }
+
+    static func content(
+        for user: StudyTurnUser,
+        history: [StudyTurn],
+        sourceContext: SourcePromptContext,
+        supportsVision: Bool
+    ) -> StudyPromptContent {
         let trimmed = user.focus.trimmingCharacters(in: .whitespacesAndNewlines)
         let goal = trimmed.isEmpty ? "Help me study the attached sources." : trimmed
-        let sourceList = user.sources.isEmpty
-            ? "No files were attached."
-            : user.sources.map { "- \($0.displayName) (\($0.kind.label))" }.joined(separator: "\n")
+        let usableSources = supportsVision ? user.sources : user.sources.filter { !$0.isImage }
+        let sourceList: String
+        if usableSources.isEmpty {
+            sourceList = user.sources.isEmpty
+                ? "No files were attached."
+                : "No usable text sources were attached for this text-only model."
+        } else {
+            sourceList = usableSources.map { "- \($0.displayName) (\($0.kind.label))" }.joined(separator: "\n")
+        }
         let transcript = renderTranscript(history)
         let formatBlock = renderFormatBlock(for: user.resourceKind)
+        let sourceInstruction = supportsVision
+            ? "Source contents follow in reading order. Images are provided as separate vision inputs with captions naming their source and location."
+            : "Source text follows in reading order. Images and scanned/image-only pages are not provided to this text-only model."
 
         let opening = """
         \(renderTaskBlock(for: user.resourceKind))
@@ -41,25 +72,34 @@ enum StudyPromptBuilder {
         Source selection:
         \(sourceContext.title)
 
-        Source contents follow in reading order. Images are provided as separate vision inputs with captions naming their source and location.
+        \(sourceInstruction)
         """
 
         var closingParts: [String] = [
-            "Base your answer strictly on the provided source contents and attached figures/pages. If the sources do not cover something, say so briefly rather than guessing. Never ask the student to upload or paste a file that already appears above - it has already been provided."
+            supportsVision
+                ? "Base your answer strictly on the provided source contents and attached figures/pages. If the sources do not cover something, say so briefly rather than guessing. Never ask the student to upload or paste a file that already appears above - it has already been provided."
+                : "Base your answer strictly on the provided source text. If the readable text does not cover something, say so briefly rather than guessing. Never ask the student to upload or paste a file that already appears above - it has already been provided."
         ]
         if sourceContext.omittedTextChunkCount > 0 {
             closingParts.append("Note: LocalTutor selected or distilled the most relevant source chunks that fit this model call. If the provided excerpts do not cover something, say so briefly.")
         }
         if sourceContext.omittedImageCount > 0 {
-            let omittedNote = sourceContext.omittedImageCount == 1
-                ? "1 additional figure/page was omitted to fit the local model."
-                : "\(sourceContext.omittedImageCount) additional figures/pages were omitted to fit the local model."
+            let omittedNote: String
+            if supportsVision {
+                omittedNote = sourceContext.omittedImageCount == 1
+                    ? "1 additional figure/page was omitted to fit the local model."
+                    : "\(sourceContext.omittedImageCount) additional figures/pages were omitted to fit the local model."
+            } else {
+                omittedNote = sourceContext.omittedImageCount == 1
+                    ? "1 image or scanned page was skipped because the selected model is text-only."
+                    : "\(sourceContext.omittedImageCount) images or scanned pages were skipped because the selected model is text-only."
+            }
             closingParts.append(omittedNote)
         }
         closingParts.append(formatBlock)
 
         return StudyPromptContent(
-            systemInstruction: "You are LocalTutor, a private local study tutor running on the student's Mac.",
+            systemInstruction: systemInstruction,
             openingText: opening,
             sourceBlocks: sourceContext.blocks,
             closingText: closingParts.joined(separator: "\n\n"),
@@ -107,7 +147,7 @@ enum StudyPromptBuilder {
             blocks.append(.image(image))
         }
         return StudyPromptContent(
-            systemInstruction: "You are LocalTutor, a private local study tutor running on the student's Mac.",
+            systemInstruction: systemInstruction,
             openingText: "Analyze the provided prompt and any attached image.",
             sourceBlocks: blocks,
             closingText: "",
@@ -123,7 +163,8 @@ enum StudyPromptBuilder {
 
         let recent = history.suffix(4)
         return "\nPrevious turns (most recent last):\n" + recent.map { turn in
-            let assistantText = turn.assistant.markdown.isEmpty ? "(no output)" : turn.assistant.markdown
+            let sanitizedMarkdown = ReasoningOutputFilter.sanitize(turn.assistant.markdown)
+            let assistantText = sanitizedMarkdown.isEmpty ? "(no output)" : sanitizedMarkdown
             return """
             Student: \(turn.user.displayPrompt)
             Tutor: \(assistantText)
@@ -163,14 +204,18 @@ enum StudyPromptBuilder {
 
     private static func sourceContext(
         from extracted: [ExtractedSource],
-        hasSources: Bool
+        hasSources: Bool,
+        supportsVision: Bool = true
     ) -> SourcePromptContext {
-        let render = renderSourceBlocks(extracted, hasSources: hasSources)
+        let render = renderSourceBlocks(extracted, hasSources: hasSources, supportsVision: supportsVision)
         let includedImages = render.blocks.reduce(0) { count, block in
             if case .image = block { return count + 1 }
             return count
         }
-        let omittedImages = extracted.reduce(0) { $0 + $1.omittedImageCount }
+        let omittedImages = extracted.reduce(0) { total, item in
+            let includedButSkipped = supportsVision ? 0 : item.includedImageCount
+            return total + item.omittedImageCount + includedButSkipped
+        }
         let warnings = extracted.flatMap(\.warnings)
         return SourcePromptContext(
             title: "Full extracted source contents selected.",
@@ -185,7 +230,8 @@ enum StudyPromptBuilder {
 
     private static func renderSourceBlocks(
         _ extracted: [ExtractedSource],
-        hasSources: Bool
+        hasSources: Bool,
+        supportsVision: Bool
     ) -> (blocks: [StudyPromptContent.Block], truncatedAny: Bool) {
         if extracted.isEmpty {
             let message = hasSources
@@ -215,7 +261,9 @@ enum StudyPromptBuilder {
                         blocks.append(.text(text))
                     }
                 case .image(let image):
-                    blocks.append(.image(image))
+                    if supportsVision {
+                        blocks.append(.image(image))
+                    }
                 }
             }
         }

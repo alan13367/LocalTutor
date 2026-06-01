@@ -6,7 +6,6 @@
 
 import CoreImage
 import Foundation
-import HuggingFace
 import MLX
 import MLXLLM
 import MLXLMCommon
@@ -16,6 +15,7 @@ import Tokenizers
 enum LocalModelRunnerEvent: Sendable {
     case stage(String)
     case downloadProgress(DownloadProgressUpdate)
+    case reasoningChunk(String)
     case outputChunk(String)
 }
 
@@ -65,9 +65,14 @@ enum LocalModelRunnerError: LocalizedError {
 }
 
 actor LocalModelRunner: InferenceService {
+    private let modelDownloadService: ManagedModelDownloadService
     private var activeContainer: ModelContainer?
     private var activeProfileID: String?
     private var isRunning = false
+
+    init(modelDownloadService: ManagedModelDownloadService = .shared) {
+        self.modelDownloadService = modelDownloadService
+    }
 
     func run(
         profile: ModelProfile,
@@ -130,6 +135,7 @@ actor LocalModelRunner: InferenceService {
         var errorMessage: String?
         var downloadSeconds = 0.0
         var loadSeconds = 0.0
+        var outputFilter = ReasoningOutputFilter()
         var peakFootprint: UInt64?
         var mlxMemoryBefore: MLXMemorySnapshotRecord?
         var mlxMemoryAfter: MLXMemorySnapshotRecord?
@@ -179,8 +185,14 @@ actor LocalModelRunner: InferenceService {
                     if firstTokenSeconds == nil {
                         firstTokenSeconds = Date().timeIntervalSince(wallStart)
                     }
-                    output += chunk
-                    await events(.outputChunk(chunk))
+                    let filteredChunk = outputFilter.append(chunk)
+                    if !filteredChunk.reasoning.isEmpty {
+                        await events(.reasoningChunk(filteredChunk.reasoning))
+                    }
+                    if !filteredChunk.visible.isEmpty {
+                        output += filteredChunk.visible
+                        await events(.outputChunk(filteredChunk.visible))
+                    }
 
                 case .info(let info):
                     completionInfo = info
@@ -190,6 +202,14 @@ actor LocalModelRunner: InferenceService {
                     output += chunk
                     await events(.outputChunk(chunk))
                 }
+            }
+            let trailingChunk = outputFilter.finish()
+            if !trailingChunk.reasoning.isEmpty {
+                await events(.reasoningChunk(trailingChunk.reasoning))
+            }
+            if !trailingChunk.visible.isEmpty {
+                output += trailingChunk.visible
+                await events(.outputChunk(trailingChunk.visible))
             }
         } catch is CancellationError {
             status = .cancelled
@@ -269,10 +289,14 @@ actor LocalModelRunner: InferenceService {
     }
 
     func clearCache() async throws {
+        guard !isRunning else {
+            throw LocalModelRunnerError.busy
+        }
         activeContainer = nil
         activeProfileID = nil
         Memory.clearCache()
         try AppDirectories.clearHuggingFaceCache()
+        try AppDirectories.clearManagedModels()
     }
 
     #if DEBUG
@@ -294,47 +318,45 @@ actor LocalModelRunner: InferenceService {
         activeProfileID = nil
         Memory.clearCache()
 
-        await events(.stage(LocalModelRunnerStage.loading(profile)))
-        let tracker = DownloadProgressTracker()
         await events(.stage(LocalModelRunnerStage.checkingModelCache()))
-        let cacheURL = try AppDirectories.huggingFaceCache()
-        let hubClient = HubClient(
-            userAgent: "LocalTutor/\(AppInfo.version)",
-            cache: HubCache(cacheDirectory: cacheURL)
-        )
-        let downloader = HuggingFaceModelDownloader(hubClient: hubClient)
         let tokenizerLoader = TransformersTokenizerLoader()
 
-        let progressHandler: @Sendable (Progress) -> Void = { progress in
-            guard let update = tracker.update(progress) else { return }
+        let progressHandler: @Sendable (DownloadProgressUpdate) -> Void = { update in
             Task {
                 await events(.downloadProgress(update))
             }
         }
+        let downloadResult = try await modelDownloadService.ensureDownloaded(
+            profile: profile,
+            progressHandler: progressHandler
+        )
 
+        await events(.stage(LocalModelRunnerStage.loading(profile)))
         let container: ModelContainer
         switch profile.configuration {
         case .llm(let configuration):
+            var localConfiguration = configuration
+            localConfiguration.id = .directory(downloadResult.directory)
             container = try await LLMModelFactory.shared.loadContainer(
-                from: downloader,
+                from: LocalDirectoryOnlyDownloader(),
                 using: tokenizerLoader,
-                configuration: configuration,
-                progressHandler: progressHandler
+                configuration: localConfiguration
             )
 
         case .vlm(let configuration):
+            var localConfiguration = configuration
+            localConfiguration.id = .directory(downloadResult.directory)
             container = try await VLMModelFactory.shared.loadContainer(
-                from: downloader,
+                from: LocalDirectoryOnlyDownloader(),
                 using: tokenizerLoader,
-                configuration: configuration,
-                progressHandler: progressHandler
+                configuration: localConfiguration
             )
         }
 
         activeContainer = container
         activeProfileID = profile.id
         await events(.stage(LocalModelRunnerStage.loaded(profile)))
-        return LoadedContainer(container: container, downloadSeconds: tracker.downloadSeconds)
+        return LoadedContainer(container: container, downloadSeconds: downloadResult.downloadSeconds)
     }
 
     nonisolated private static func prepareInput(
@@ -365,7 +387,9 @@ actor LocalModelRunner: InferenceService {
                     chat.append(.user(text))
                 }
             case .image(let image):
-                chat.append(.user(image.displayCaption, images: [.ciImage(image.image)]))
+                if runtimePolicy.supportsVision {
+                    chat.append(.user(image.displayCaption, images: [.ciImage(image.image)]))
+                }
             }
         }
 
@@ -385,15 +409,27 @@ actor LocalModelRunner: InferenceService {
 
 }
 
+private struct LocalDirectoryOnlyDownloader: Downloader {
+    func download(
+        id: String,
+        revision: String?,
+        matching patterns: [String],
+        useLatest: Bool,
+        progressHandler: @Sendable @escaping (Progress) -> Void
+    ) async throws -> URL {
+        throw ManagedModelDownloadError.invalidRepositoryID(id)
+    }
+}
+
 private struct LoadedContainer: Sendable {
     var container: ModelContainer
     var downloadSeconds: Double
 }
 
 private extension ModelRuntimeDefaults {
-    func generateParameters(maxTokensOverride: Int? = nil, temperatureOverride: Float? = nil) -> GenerateParameters {
+    func generateParameters(maxTokensOverride _: Int? = nil, temperatureOverride: Float? = nil) -> GenerateParameters {
         GenerateParameters(
-            maxTokens: maxTokensOverride ?? maxTokens,
+            maxTokens: nil,
             maxKVSize: maxKVSize,
             kvBits: kvBits,
             temperature: temperatureOverride ?? temperature,

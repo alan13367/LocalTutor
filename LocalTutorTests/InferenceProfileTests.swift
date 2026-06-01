@@ -22,7 +22,7 @@ struct InferenceProfileTests {
             8.gibibytes,
             16.gibibytes
         ])
-        #expect(profiles.map(\.defaults.documentImageLimit) == [2, 4])
+        #expect(profiles.map(\.defaults.documentImageLimit) == [1, 1])
         #expect(profiles.map(\.defaults.maxKVSize) == [6_144, 2_048])
         #expect(ModelProfile.gemma4E4B.defaults.maxTokens == 512)
         #expect(ModelProfile.gemma4E4B.defaults.prefillStepSize == 64)
@@ -32,10 +32,30 @@ struct InferenceProfileTests {
     func studyCatalogContainsOnlyReliableStructuredOutputProfiles() {
         let profiles = ModelProfile.studyCatalog
 
-        #expect(profiles.map(\.id) == ["gemma4E2B", "gemma4E4B", "qwen3VL4B"])
+        #expect(profiles.map(\.id) == ["gemma4E2B", "gemma4E4B", "qwen3VL4B", "lfm25A1B8B"])
         #expect(ModelProfile.qwen3VL4B.defaults.maxKVSize == 2_048)
         #expect(ModelProfile.qwen3VL4B.defaults.maxTokens == 512)
         #expect(ModelProfile.qwen3VL4B.defaults.prefillStepSize == 64)
+    }
+
+    @Test
+    func lfmProfileIsTextOnlyLLM() {
+        let lfm = ModelProfile.lfm25A1B8B
+        let policy = ModelRuntimePolicyProvider.policy(for: lfm, systemMemoryBytes: 16.gibibytes)
+
+        #expect(lfm.kind == .text)
+        #expect(lfm.supportsVision == false)
+        #expect(lfm.modelIdentifier == "mlx-community/LFM2.5-8B-A1B-MLX-4bit")
+        #expect(policy.documentImageLimit == 0)
+        #expect(policy.generationDefaults.imageResize == nil)
+        #expect(policy.generationDefaults.maxKVSize == 6_144)
+        #expect(policy.generationDefaults.prefillStepSize == 128)
+
+        if case .llm = lfm.configuration {
+            #expect(true)
+        } else {
+            Issue.record("LFM should load through the LLM factory.")
+        }
     }
 
     @Test
@@ -66,7 +86,7 @@ struct InferenceProfileTests {
         #expect(e2B.cacheLimitBytes == 128 * 1024 * 1024)
         #expect(e4B.cacheLimitBytes == 64 * 1024 * 1024)
         #expect(qwen.cacheLimitBytes == 64 * 1024 * 1024)
-        #expect([e2B.documentImageLimit, e4B.documentImageLimit, qwen.documentImageLimit] == [2, 4, 4])
+        #expect([e2B.documentImageLimit, e4B.documentImageLimit, qwen.documentImageLimit] == [1, 1, 4])
     }
 
     @Test

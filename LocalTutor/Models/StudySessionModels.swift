@@ -203,7 +203,14 @@ struct StudySource: Identifiable, Equatable, Hashable, Codable {
     }
 
     static var supportedContentTypes: [UTType] {
-        var types: [UTType] = [.pdf, .image, .text, .plainText, .rtf, .commaSeparatedText]
+        supportedContentTypes(supportsVision: true)
+    }
+
+    static func supportedContentTypes(supportsVision: Bool) -> [UTType] {
+        var types: [UTType] = [.pdf, .text, .plainText, .rtf, .commaSeparatedText]
+        if supportsVision {
+            types.append(.image)
+        }
         let extensions = ["doc", "docx", "pages", "ppt", "pptx", "key", "xls", "xlsx", "numbers", "md", "csv"]
         types.append(contentsOf: extensions.compactMap { UTType(filenameExtension: $0) })
         return Array(Set(types))
@@ -311,6 +318,7 @@ struct StudyTurnUser: Identifiable, Equatable, Codable {
 
 struct StudyTurnAssistant: Equatable, Codable {
     var markdown: String = ""
+    var reasoning: String = ""
     var status: StudyTurnStatus = .streaming
     var statusMessage: String = "Starting"
     var startedAt: Date = Date()
@@ -318,6 +326,33 @@ struct StudyTurnAssistant: Equatable, Codable {
     var downloadProgress: Double?
     var isDownloading: Bool = false
     var payload: StudyArtifactPayload?
+
+    private enum CodingKeys: String, CodingKey {
+        case markdown
+        case reasoning
+        case status
+        case statusMessage
+        case startedAt
+        case finishedAt
+        case downloadProgress
+        case isDownloading
+        case payload
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        markdown = (try? container.decode(String.self, forKey: .markdown)) ?? ""
+        reasoning = (try? container.decode(String.self, forKey: .reasoning)) ?? ""
+        status = (try? container.decode(StudyTurnStatus.self, forKey: .status)) ?? .done
+        statusMessage = (try? container.decode(String.self, forKey: .statusMessage)) ?? "Ready"
+        startedAt = (try? container.decode(Date.self, forKey: .startedAt)) ?? Date()
+        finishedAt = try? container.decode(Date.self, forKey: .finishedAt)
+        downloadProgress = try? container.decode(Double.self, forKey: .downloadProgress)
+        isDownloading = (try? container.decode(Bool.self, forKey: .isDownloading)) ?? false
+        payload = try? container.decode(StudyArtifactPayload.self, forKey: .payload)
+    }
 }
 
 struct StudyTurn: Identifiable, Equatable, Codable {

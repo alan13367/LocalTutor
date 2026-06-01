@@ -35,6 +35,41 @@ enum AppDirectories {
         try fileManager.createDirectory(at: cache, withIntermediateDirectories: true)
     }
 
+    static func managedModels(fileManager: FileManager = .default) throws -> URL {
+        let directory = try applicationSupportRoot(fileManager: fileManager)
+            .appendingPathComponent("Models", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    static func managedModelRepositories(fileManager: FileManager = .default) throws -> URL {
+        let directory = try managedModels(fileManager: fileManager)
+            .appendingPathComponent("Repositories", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    static func modelDownloadStaging(fileManager: FileManager = .default) throws -> URL {
+        let directory = try managedModels(fileManager: fileManager)
+            .appendingPathComponent("DownloadStaging", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    static func modelDownloadJobsFile(fileManager: FileManager = .default) throws -> URL {
+        try managedModels(fileManager: fileManager)
+            .appendingPathComponent("model-download-jobs.json", isDirectory: false)
+    }
+
+    static func clearManagedModels(fileManager: FileManager = .default) throws {
+        let directory = try applicationSupportRoot(fileManager: fileManager)
+            .appendingPathComponent("Models", isDirectory: true)
+        if fileManager.fileExists(atPath: directory.path) {
+            try fileManager.removeItem(at: directory)
+        }
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
     static func benchmarks(fileManager: FileManager = .default) throws -> URL {
         let directory = try applicationSupportRoot(fileManager: fileManager)
             .appendingPathComponent("Benchmarks", isDirectory: true)

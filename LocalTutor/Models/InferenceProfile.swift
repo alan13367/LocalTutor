@@ -125,6 +125,7 @@ extension ModelProfile {
     static let gemma4E2B = ModelCatalog.gemma4E2B
     static let gemma4E4B = ModelCatalog.gemma4E4B
     static let qwen3VL4B = ModelCatalog.qwen3VL4B
+    static let lfm25A1B8B = ModelCatalog.lfm25A1B8B
     static let v0Catalog = ModelCatalog.v0Catalog
     static let studyCatalog = ModelCatalog.studyCatalog
 

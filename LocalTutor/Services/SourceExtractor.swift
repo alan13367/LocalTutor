@@ -98,6 +98,14 @@ enum SourceExtractor {
         }
     }
 
+    private static func imagesDisabledWarning(for source: StudySource) -> String {
+        "\(source.displayName) contains images or scanned pages that were skipped because the selected model is text-only. Switch to a vision model to include them."
+    }
+
+    private static func imageOnlyFailure(for source: StudySource) -> String {
+        "No readable text was found. This source appears to rely on images or scanned pages; switch to a vision model to study it."
+    }
+
     private static func extractOne(
         _ source: StudySource,
         options: SourceExtractionOptions
@@ -148,7 +156,8 @@ enum SourceExtractor {
             default:
                 let text = try readAttributed(url, fileExtension: source.fileExtension)
                 var extracted = textSource(source, text: text)
-                if source.fileExtension == "rtfd",
+                if options.allowsImages,
+                   source.fileExtension == "rtfd",
                    let preview = try? await readPreviewImage(url, source: source, locator: nil, options: options) {
                     var included = extracted.includedImageCount
                     var omitted = 0
@@ -255,14 +264,25 @@ enum SourceExtractor {
         }
 
         if blocks.isEmpty {
+            let failure = !options.allowsImages && omitted > 0
+                ? imageOnlyFailure(for: source)
+                : "No readable text or page preview could be extracted from this PDF."
             return ExtractedSource(
                 source: source,
                 blocks: [],
-                failureReason: "No readable text or page preview could be extracted from this PDF."
+                failureReason: failure,
+                warnings: !options.allowsImages && omitted > 0 ? [imagesDisabledWarning(for: source)] : [],
+                omittedImageCount: omitted
             )
         }
 
-        return ExtractedSource(source: source, blocks: blocks, failureReason: nil, omittedImageCount: omitted)
+        return ExtractedSource(
+            source: source,
+            blocks: blocks,
+            failureReason: nil,
+            warnings: !options.allowsImages && omitted > 0 ? [imagesDisabledWarning(for: source)] : [],
+            omittedImageCount: omitted
+        )
     }
 
     private static func pageLikelyContainsImage(_ page: PDFPage) -> Bool {
@@ -344,6 +364,16 @@ enum SourceExtractor {
         source: StudySource,
         options: SourceExtractionOptions
     ) throws -> ExtractedSource {
+        guard options.allowsImages else {
+            return ExtractedSource(
+                source: source,
+                blocks: [],
+                failureReason: nil,
+                warnings: ["\(source.displayName) was skipped because the selected model is text-only. Switch to a vision model to study images."],
+                omittedImageCount: 1
+            )
+        }
+
         guard let image = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
             throw SourceExtractorError.unreadable("Could not load the image.")
         }
@@ -479,6 +509,10 @@ enum SourceExtractor {
                     blocks.append(.text(cleaned))
                 }
             case .imageRef(let id):
+                guard options.allowsImages else {
+                    omitted += 1
+                    continue
+                }
                 guard let target = relationships[id],
                       let imageData = try? archiveData(in: archive, path: normalizedArchivePath(base: "word", target: target)),
                       let image = imageFromData(imageData) else {
@@ -500,10 +534,29 @@ enum SourceExtractor {
         }
 
         if blocks.isEmpty, let attributed = try? readAttributed(url, fileExtension: source.fileExtension) {
-            return textSource(source, text: attributed)
+            let fallback = textSource(source, text: attributed)
+            if fallback.hasContent {
+                return fallback
+            }
         }
 
-        return ExtractedSource(source: source, blocks: blocks, failureReason: nil, omittedImageCount: omitted)
+        if blocks.isEmpty, !options.allowsImages, omitted > 0 {
+            return ExtractedSource(
+                source: source,
+                blocks: [],
+                failureReason: imageOnlyFailure(for: source),
+                warnings: [imagesDisabledWarning(for: source)],
+                omittedImageCount: omitted
+            )
+        }
+
+        return ExtractedSource(
+            source: source,
+            blocks: blocks,
+            failureReason: nil,
+            warnings: !options.allowsImages && omitted > 0 ? [imagesDisabledWarning(for: source)] : [],
+            omittedImageCount: omitted
+        )
     }
 
     private static func readPptx(
@@ -537,6 +590,14 @@ enum SourceExtractor {
 
             let slideRelsPath = relationshipsPath(for: slidePath)
             let slideRelationships = (try? relationships(in: archive, path: slideRelsPath)) ?? [:]
+            if !options.allowsImages {
+                omitted += refs.filter {
+                    if case .imageRef = $0 { return true }
+                    return false
+                }.count
+                continue
+            }
+
             let images = refs.compactMap { ref -> CIImage? in
                 guard case .imageRef(let id) = ref,
                       let target = slideRelationships[id],
@@ -579,9 +640,24 @@ enum SourceExtractor {
         }
 
         if blocks.isEmpty {
+            if !options.allowsImages, omitted > 0 {
+                return ExtractedSource(
+                    source: source,
+                    blocks: [],
+                    failureReason: imageOnlyFailure(for: source),
+                    warnings: [imagesDisabledWarning(for: source)],
+                    omittedImageCount: omitted
+                )
+            }
             throw SourceExtractorError.unreadable("No readable slide contents were found.")
         }
-        return ExtractedSource(source: source, blocks: blocks, failureReason: nil, omittedImageCount: omitted)
+        return ExtractedSource(
+            source: source,
+            blocks: blocks,
+            failureReason: nil,
+            warnings: !options.allowsImages && omitted > 0 ? [imagesDisabledWarning(for: source)] : [],
+            omittedImageCount: omitted
+        )
     }
 
     private static func readXlsx(
@@ -609,6 +685,14 @@ enum SourceExtractor {
             let sheetText = rows.joined(separator: "\n")
             if !sheetText.isEmpty {
                 blocks.append(.text("=== \(source.displayName) \(sheet.name) ===\n\(sheetText)"))
+            }
+
+            if !options.allowsImages {
+                omitted += parseTextAndImageRefs(sheetXML).filter {
+                    if case .imageRef = $0 { return true }
+                    return false
+                }.count
+                continue
             }
 
             let drawingImages = worksheetDrawingImages(archive: archive, sheetPath: sheetPath, sheetXML: sheetXML)
@@ -645,9 +729,24 @@ enum SourceExtractor {
         }
 
         if blocks.isEmpty {
+            if !options.allowsImages, omitted > 0 {
+                return ExtractedSource(
+                    source: source,
+                    blocks: [],
+                    failureReason: imageOnlyFailure(for: source),
+                    warnings: [imagesDisabledWarning(for: source)],
+                    omittedImageCount: omitted
+                )
+            }
             throw SourceExtractorError.unreadable("No readable spreadsheet contents were found.")
         }
-        return ExtractedSource(source: source, blocks: blocks, failureReason: nil, omittedImageCount: omitted)
+        return ExtractedSource(
+            source: source,
+            blocks: blocks,
+            failureReason: nil,
+            warnings: !options.allowsImages && omitted > 0 ? [imagesDisabledWarning(for: source)] : [],
+            omittedImageCount: omitted
+        )
     }
 
     // MARK: - iWork and preview fallbacks
@@ -663,6 +762,7 @@ enum SourceExtractor {
             if let document = PDFDocument(url: previewPDF) {
                 return extractPDF(document, source: source, options: options)
             }
+            guard options.allowsImages else { return nil }
             for name in ["Thumbnail.jpg", "Thumbnail.png"] {
                 let thumbnailURL = quickLook.appendingPathComponent(name)
                 if FileManager.default.fileExists(atPath: thumbnailURL.path),
@@ -683,6 +783,7 @@ enum SourceExtractor {
            let document = PDFDocument(data: data) {
             return extractPDF(document, source: source, options: options)
         }
+        guard options.allowsImages else { return nil }
         for path in ["QuickLook/Thumbnail.jpg", "QuickLook/Thumbnail.png"] {
             if let data = try? archiveData(in: archive, path: path),
                let image = imageFromData(data) {
@@ -698,6 +799,16 @@ enum SourceExtractor {
         options: SourceExtractionOptions,
         warning: String
     ) async throws -> ExtractedSource {
+        guard options.allowsImages else {
+            return ExtractedSource(
+                source: source,
+                blocks: [],
+                failureReason: imageOnlyFailure(for: source),
+                warnings: [imagesDisabledWarning(for: source)],
+                omittedImageCount: 1
+            )
+        }
+
         if let image = try await readPreviewImage(url, source: source, locator: nil, options: options) {
             return previewSource(source: source, image: image, options: options, warning: warning)
         }

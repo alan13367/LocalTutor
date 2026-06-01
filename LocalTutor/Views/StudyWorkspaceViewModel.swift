@@ -27,6 +27,8 @@ struct ModelDownloadStatus: Equatable {
 
 @MainActor
 final class StudyWorkspaceViewModel: ObservableObject {
+    private static let noSelectedProfileID = "__localtutor_no_selected_profile__"
+
     // Persisted study-session history. Each session owns its own sources + turns.
     @Published private(set) var sessions: [StudySession] = []
     @Published var currentSessionID: UUID = UUID()
@@ -35,6 +37,8 @@ final class StudyWorkspaceViewModel: ObservableObject {
     @Published var composerText: String = ""
     @Published var globalError: String?
     @Published var modelDownloadStatus: ModelDownloadStatus?
+    @Published private(set) var modelCacheInfoByProfileID: [String: ModelCacheInfo] = [:]
+    @Published private(set) var removingModelProfileIDs: Set<String> = []
 
     /// The session that owns the in-flight generation, if any.
     @Published private(set) var runningSessionID: UUID?
@@ -42,12 +46,15 @@ final class StudyWorkspaceViewModel: ObservableObject {
     @AppStorage(AppStorageKeys.selectedProfileID) private var storedProfileID: String = ""
 
     private let inferenceService: any InferenceService
+    private let cacheInfoProvider: @Sendable ([ModelProfile]) async -> [String: ModelCacheInfo]
+    private let cachedModelRemover: @Sendable (ModelProfile) async throws -> ModelCacheRemovalResult
     private let store = SessionStore()
     private var runTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var modelPreloadTask: Task<Void, Error>?
     private var modelPreloadProfileID: String?
     private var modelDownloadDismissTask: Task<Void, Never>?
+    private var modelCacheRefreshTask: Task<Void, Never>?
     private var hasLoaded = false
 
     // Streaming coalescing: buffer tokens and flush to the UI on a frame cadence
@@ -55,8 +62,22 @@ final class StudyWorkspaceViewModel: ObservableObject {
     private var pendingChunks: String = ""
     private var flushScheduled = false
 
-    init(inferenceService: any InferenceService = LocalModelRunner()) {
+    init(
+        inferenceService: any InferenceService = LocalModelRunner(),
+        cacheInfoProvider: @escaping @Sendable ([ModelProfile]) async -> [String: ModelCacheInfo] = { profiles in
+            await Task.detached(priority: .utility) {
+                ModelCacheStore.cacheInfoByProfileID(for: profiles)
+            }.value
+        },
+        cachedModelRemover: @escaping @Sendable (ModelProfile) async throws -> ModelCacheRemovalResult = { profile in
+            try await Task.detached(priority: .utility) {
+                try ModelCacheStore.removeCachedModel(for: profile)
+            }.value
+        }
+    ) {
         self.inferenceService = inferenceService
+        self.cacheInfoProvider = cacheInfoProvider
+        self.cachedModelRemover = cachedModelRemover
         bootstrap()
     }
 
@@ -74,6 +95,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
         sessions = loaded
         currentSessionID = loaded[0].id
         hasLoaded = true
+        refreshModelCacheInfo()
     }
 
     // MARK: - Current session access
@@ -165,18 +187,117 @@ final class StudyWorkspaceViewModel: ObservableObject {
 
     // MARK: - Profiles
 
-    var activeProfile: ModelProfile {
+    var selectedProfile: ModelProfile? {
+        if storedProfileID == Self.noSelectedProfileID {
+            return nil
+        }
+
         if let profile = ModelProfile.profile(withID: storedProfileID),
            MemoryPreflight.evaluate(profile: profile).canRun {
             return profile
         }
-        return ModelProfile.recommendedDefault
+
+        if storedProfileID.isEmpty {
+            let defaultProfile = ModelProfile.recommendedDefault
+            return MemoryPreflight.evaluate(profile: defaultProfile).canRun ? defaultProfile : nil
+        }
+
+        return nil
+    }
+
+    var activeProfile: ModelProfile {
+        selectedProfile ?? ModelProfile.recommendedDefault
+    }
+
+    var supportedSourceContentTypes: [UTType] {
+        StudySource.supportedContentTypes(supportsVision: selectedProfile?.supportsVision ?? true)
     }
 
     func setActiveProfile(_ profile: ModelProfile) {
         storedProfileID = profile.id
         startModelPreload(for: profile)
         objectWillChange.send()
+    }
+
+    func refreshModelCacheInfo() {
+        modelCacheRefreshTask?.cancel()
+        let profiles = ModelProfile.studyCatalog
+        let cacheInfoProvider = cacheInfoProvider
+        modelCacheRefreshTask = Task { [weak self] in
+            let cacheInfo = await cacheInfoProvider(profiles)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.modelCacheInfoByProfileID = cacheInfo
+                self?.modelCacheRefreshTask = nil
+            }
+        }
+    }
+
+    func cacheInfo(for profile: ModelProfile) -> ModelCacheInfo {
+        modelCacheInfoByProfileID[profile.id] ?? .empty
+    }
+
+    func isRemovingCachedModel(_ profile: ModelProfile) -> Bool {
+        removingModelProfileIDs.contains(profile.id)
+    }
+
+    func canRemoveCachedModel(_ profile: ModelProfile) -> Bool {
+        guard cacheInfo(for: profile).isCached else { return false }
+        guard !removingModelProfileIDs.contains(profile.id) else { return false }
+        return runningSessionID == nil
+    }
+
+    func removeCachedModel(_ profile: ModelProfile) {
+        guard !removingModelProfileIDs.contains(profile.id) else { return }
+        guard runningSessionID == nil else {
+            globalError = "Stop the current response before removing model files."
+            return
+        }
+
+        let shouldClearSelection = selectedProfile?.id == profile.id
+        if shouldClearSelection {
+            storedProfileID = Self.noSelectedProfileID
+            objectWillChange.send()
+        }
+
+        let preloadTaskToCancel: Task<Void, Error>?
+        if modelPreloadProfileID == profile.id {
+            preloadTaskToCancel = modelPreloadTask
+            preloadTaskToCancel?.cancel()
+            clearModelPreloadIfCurrent(profile)
+        } else {
+            preloadTaskToCancel = nil
+        }
+
+        modelDownloadDismissTask?.cancel()
+        modelDownloadDismissTask = nil
+        removingModelProfileIDs.insert(profile.id)
+        modelDownloadStatus = ModelDownloadStatus(
+            profileID: profile.id,
+            profileName: profile.name,
+            message: "Removing downloaded files",
+            fraction: nil,
+            phase: .checking
+        )
+
+        let inferenceService = inferenceService
+        let cachedModelRemover = cachedModelRemover
+        Task { [weak self] in
+            do {
+                if let preloadTaskToCancel {
+                    _ = await preloadTaskToCancel.result
+                }
+                await inferenceService.unload()
+                let result = try await cachedModelRemover(profile)
+                await MainActor.run {
+                    self?.completeCachedModelRemoval(profile, result: result)
+                }
+            } catch {
+                await MainActor.run {
+                    self?.failCachedModelRemoval(profile, error: error)
+                }
+            }
+        }
     }
 
     func dismissModelDownloadStatus() {
@@ -261,7 +382,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
                 phase: .downloading
             )
 
-        case .outputChunk:
+        case .reasoningChunk, .outputChunk:
             break
         }
     }
@@ -299,7 +420,33 @@ final class StudyWorkspaceViewModel: ObservableObject {
             fraction: 1,
             phase: .ready
         )
+        refreshModelCacheInfo()
         scheduleModelDownloadDismiss()
+    }
+
+    private func completeCachedModelRemoval(_ profile: ModelProfile, result: ModelCacheRemovalResult) {
+        removingModelProfileIDs.remove(profile.id)
+        modelCacheInfoByProfileID[profile.id] = .empty
+        modelDownloadStatus = ModelDownloadStatus(
+            profileID: profile.id,
+            profileName: profile.name,
+            message: "Removed \(result.sizeDescription)",
+            fraction: 1,
+            phase: .ready
+        )
+        scheduleModelDownloadDismiss()
+    }
+
+    private func failCachedModelRemoval(_ profile: ModelProfile, error: Error) {
+        removingModelProfileIDs.remove(profile.id)
+        modelDownloadStatus = ModelDownloadStatus(
+            profileID: profile.id,
+            profileName: profile.name,
+            message: error.localizedDescription,
+            fraction: nil,
+            phase: .failed
+        )
+        refreshModelCacheInfo()
     }
 
     private func failModelPreload(for profile: ModelProfile, error: Error) {
@@ -333,11 +480,20 @@ final class StudyWorkspaceViewModel: ObservableObject {
     }
 
     var preflight: MemoryPreflightResult {
-        MemoryPreflight.evaluate(profile: activeProfile)
+        guard let selectedProfile else {
+            return MemoryPreflightResult(
+                canRun: false,
+                systemMemoryBytes: SystemMemory.totalBytes(),
+                requiredBytes: 0,
+                message: "Choose a model before studying."
+            )
+        }
+        return MemoryPreflight.evaluate(profile: selectedProfile)
     }
 
     var selectedImageURL: URL? {
-        sources.first(where: \.isImage)?.accessibleURL
+        guard selectedProfile?.supportsVision == true else { return nil }
+        return sources.first(where: \.isImage)?.accessibleURL
     }
 
     // MARK: - Run state
@@ -353,12 +509,17 @@ final class StudyWorkspaceViewModel: ObservableObject {
     }
 
     var canSend: Bool {
+        guard selectedProfile != nil else { return false }
         guard runningSessionID == nil else { return false }
         let hasText = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if selectedResource.allowsEmptyFocus {
-            return hasText || !sources.isEmpty
+            return hasText || !usableSourcesForActiveProfile.isEmpty
         }
         return hasText
+    }
+
+    private var usableSourcesForActiveProfile: [StudySource] {
+        selectedProfile?.supportsVision == false ? sources.filter { !$0.isImage } : sources
     }
 
     var shouldShowFirstTurnSourcePreview: Bool {
@@ -387,14 +548,28 @@ final class StudyWorkspaceViewModel: ObservableObject {
     // MARK: - Source management
 
     func importURLs(_ urls: [URL]) {
+        importURLs(urls, supportsVision: selectedProfile?.supportsVision ?? true)
+    }
+
+    func importURLs(_ urls: [URL], supportsVision: Bool) {
         let existingURLs = Set(sources.map(\.url))
-        let newSources = urls
+        let candidates = urls
             .filter { !existingURLs.contains($0) }
             .map(StudySource.init(url:))
+        let rejectedImages = supportsVision ? [] : candidates.filter(\.isImage)
+        let newSources = candidates.filter { supportsVision || !$0.isImage }
 
-        guard !newSources.isEmpty else { return }
-        sources.append(contentsOf: newSources)
-        globalError = nil
+        if !newSources.isEmpty {
+            sources.append(contentsOf: newSources)
+        }
+
+        if !rejectedImages.isEmpty {
+            globalError = rejectedImages.count == 1
+                ? "Images require a vision model."
+                : "\(rejectedImages.count) images require a vision model."
+        } else if !newSources.isEmpty {
+            globalError = nil
+        }
     }
 
     func importFromDropProviders(_ providers: [NSItemProvider]) -> Bool {
@@ -501,7 +676,10 @@ final class StudyWorkspaceViewModel: ObservableObject {
     // MARK: - Streaming
 
     private func startTurn(user: StudyTurnUser) {
-        let profile = activeProfile
+        guard let profile = selectedProfile else {
+            globalError = "Choose a model before sending."
+            return
+        }
         let runtimePolicy = ModelRuntimePolicyProvider.policy(for: profile)
         let preflight = MemoryPreflight.evaluate(policy: runtimePolicy)
         guard preflight.canRun else {
@@ -522,7 +700,6 @@ final class StudyWorkspaceViewModel: ObservableObject {
 
         runTask = Task { [weak self] in
             guard let self else { return }
-            let maxTokens: Int? = user.resourceKind.isInteractive ? 2048 : nil
             let temperature: Float? = user.resourceKind.isInteractive ? 0.1 : nil
 
             do {
@@ -538,7 +715,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
                             profile: profile,
                             runtimePolicy: runtimePolicy,
                             promptContent: content,
-                            maxTokens: maxTokens,
+                            maxTokens: nil,
                             temperature: temperature
                         )
                         let record = try await self.inferenceService.run(request: request) { [weak self] event in
@@ -573,7 +750,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
                     profile: profile,
                     runtimePolicy: runtimePolicy,
                     promptContent: promptContent,
-                    maxTokens: maxTokens,
+                    maxTokens: nil,
                     temperature: temperature
                 )
                 let record = try await self.inferenceService.run(request: request) { [weak self] event in
@@ -599,11 +776,12 @@ final class StudyWorkspaceViewModel: ObservableObject {
         switch event {
         case .stage:
             return
-        case .downloadProgress(let update):
+        case .downloadProgress:
+            return
+        case .reasoningChunk(let chunk):
             updateTurn(turnID) { turn in
-                turn.assistant.isDownloading = true
-                turn.assistant.downloadProgress = update.fraction
-                turn.assistant.statusMessage = update.message
+                turn.assistant.reasoning += chunk
+                turn.assistant.statusMessage = "Thinking"
             }
         case .outputChunk:
             break
@@ -641,14 +819,16 @@ final class StudyWorkspaceViewModel: ObservableObject {
                     turn.assistant.downloadProgress = nil
                 }
             }
-        case .downloadProgress(let update):
+        case .downloadProgress:
+            return
+        case .reasoningChunk(let chunk):
             updateTurn(turnID) { turn in
-                turn.assistant.isDownloading = true
-                turn.assistant.downloadProgress = update.fraction
-                turn.assistant.statusMessage = update.message
+                turn.assistant.reasoning += chunk
+                turn.assistant.statusMessage = "Thinking"
             }
         case .outputChunk(let chunk):
             pendingChunks += chunk
+            updateStatusIfStreaming(turnID: turnID, message: "Writing answer")
             scheduleFlush(turnID: turnID, kind: kind)
         }
     }

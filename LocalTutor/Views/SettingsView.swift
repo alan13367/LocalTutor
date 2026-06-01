@@ -31,15 +31,20 @@ struct SettingsView: View {
         }
         .frame(minWidth: 720, idealWidth: 820, minHeight: 560, idealHeight: 700)
         .overlay(alignment: .bottomTrailing) {
-            if let status = viewModel.modelDownloadStatus {
-                ModelDownloadToast(status: status) {
-                    viewModel.dismissModelDownloadStatus()
+            ZStack {
+                if let status = viewModel.modelDownloadStatus {
+                    ModelDownloadToast(status: status) {
+                        viewModel.dismissModelDownloadStatus()
+                    }
+                    .padding(20)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
-                .padding(20)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
+            .animation(.easeOut(duration: 0.18), value: viewModel.modelDownloadStatus != nil)
         }
-        .animation(.easeOut(duration: 0.18), value: viewModel.modelDownloadStatus)
+        .onAppear {
+            viewModel.refreshModelCacheInfo()
+        }
     }
 
     private var header: some View {
@@ -115,12 +120,12 @@ struct SettingsView: View {
                 Text("Models")
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Label("All vision-capable · MLX format", systemImage: "checkmark.seal.fill")
+                Label("Text / Vision · MLX format", systemImage: "checkmark.seal.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .labelStyle(.titleAndIcon)
             }
-            Text("LocalTutor only ships models that are vision-capable, quantized for Apple Silicon, and gated to your Mac's memory tier. Pick the one that fits how you want to study.")
+            Text("LocalTutor ships Apple Silicon MLX models gated to your Mac's memory tier. Vision models can inspect images and figures; text-only models focus on readable source text.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -129,10 +134,15 @@ struct SettingsView: View {
                 ForEach(ModelProfile.studyCatalog) { profile in
                     ModelOptionRow(
                         profile: profile,
-                        isSelected: profile.id == viewModel.activeProfile.id,
-                        canRun: MemoryPreflight.evaluate(profile: profile, systemMemoryBytes: systemMemory).canRun
+                        isSelected: profile.id == viewModel.selectedProfile?.id,
+                        canRun: MemoryPreflight.evaluate(profile: profile, systemMemoryBytes: systemMemory).canRun,
+                        cacheInfo: viewModel.cacheInfo(for: profile),
+                        isRemovingDownload: viewModel.isRemovingCachedModel(profile),
+                        canRemoveDownload: viewModel.canRemoveCachedModel(profile)
                     ) {
                         viewModel.setActiveProfile(profile)
+                    } onRemoveDownload: {
+                        viewModel.removeCachedModel(profile)
                     }
                 }
             }
@@ -168,33 +178,55 @@ private struct ModelOptionRow: View {
     let profile: ModelProfile
     let isSelected: Bool
     let canRun: Bool
+    let cacheInfo: ModelCacheInfo
+    let isRemovingDownload: Bool
+    let canRemoveDownload: Bool
     var onSelect: () -> Void
+    var onRemoveDownload: () -> Void
+
+    @State private var isShowingRemoveConfirmation = false
 
     var body: some View {
-        Button(action: {
-            guard canRun else { return }
-            onSelect()
-        }) {
-            HStack(alignment: .top, spacing: 14) {
-                radio
-                content
-                Spacer(minLength: 0)
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: {
+                guard canRun else { return }
+                onSelect()
+            }) {
+                HStack(alignment: .top, spacing: 14) {
+                    radio
+                    content
+                }
+                .contentShape(Rectangle())
             }
-            .padding(16)
-            .background(background)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(
-                        isSelected ? Color.accentColor : Color.primary.opacity(0.06),
-                        lineWidth: isSelected ? 1.4 : 0.5
-                    )
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .buttonStyle(.plain)
+            .disabled(!canRun)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .opacity(canRun ? 1.0 : 0.55)
+
+            cacheAction
         }
-        .buttonStyle(.plain)
-        .disabled(!canRun)
+        .padding(16)
+        .background(background)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(
+                    isSelected ? Color.accentColor : Color.primary.opacity(0.06),
+                    lineWidth: isSelected ? 1.4 : 0.5
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .help(canRun ? profile.summary : "Requires \(profile.minimumSystemMemoryDescription) of unified memory.")
+        .confirmationDialog(
+            "Remove \(profile.name)?",
+            isPresented: $isShowingRemoveConfirmation
+        ) {
+            Button("Remove Download", role: .destructive) {
+                onRemoveDownload()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This frees \(cacheInfo.sizeDescription). The model will download again the next time you use it.")
+        }
     }
 
     private var background: some View {
@@ -237,6 +269,14 @@ private struct ModelOptionRow: View {
                         .background(Capsule().fill(Color.orange.opacity(0.18)))
                         .foregroundStyle(.orange)
                 }
+                if cacheInfo.isCached {
+                    Text("Downloaded · \(cacheInfo.sizeDescription)")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.primary.opacity(0.06)))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Text(profile.tierLabel)
                     .font(.caption.weight(.medium))
@@ -253,6 +293,8 @@ private struct ModelOptionRow: View {
                 metaItem(icon: "cpu", text: profile.parameterScale)
                 if profile.supportsVision {
                     metaItem(icon: "eye", text: "Vision")
+                } else {
+                    metaItem(icon: "text.alignleft", text: "Text-only")
                 }
             }
             .font(.caption)
@@ -276,6 +318,28 @@ private struct ModelOptionRow: View {
         HStack(spacing: 4) {
             Image(systemName: icon)
             Text(text)
+        }
+    }
+
+    @ViewBuilder
+    private var cacheAction: some View {
+        if isRemovingDownload {
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 30, height: 30)
+                .help("Removing downloaded files")
+        } else if cacheInfo.isCached {
+            Button {
+                isShowingRemoveConfirmation = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(canRemoveDownload ? .secondary : .tertiary)
+            .disabled(!canRemoveDownload)
+            .help(canRemoveDownload ? "Remove downloaded model files" : "Stop the current response before removing model files")
         }
     }
 }

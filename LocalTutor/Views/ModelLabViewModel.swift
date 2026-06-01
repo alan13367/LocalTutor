@@ -183,6 +183,9 @@ final class ModelLabViewModel: ObservableObject {
             downloadProgress = update.fraction
             statusMessage = update.message
 
+        case .reasoningChunk:
+            break
+
         case .outputChunk(let chunk):
             output += chunk
         }

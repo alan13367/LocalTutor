@@ -12,6 +12,7 @@ struct StudyArtifactCard: View {
     var onRegenerate: () -> Void
     var onCopy: () -> Void
     var onExport: () -> Void
+    @State private var isThinkingExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -81,6 +82,12 @@ struct StudyArtifactCard: View {
                 .padding(.top, 16)
                 .padding(.bottom, 10)
 
+            if !thinkingText.isEmpty {
+                thinkingPreview
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 12)
+            }
+
             bodyContent
                 .padding(.horizontal, 18)
                 .padding(.bottom, 12)
@@ -133,12 +140,72 @@ struct StudyArtifactCard: View {
         }
     }
 
+    private var thinkingText: String {
+        turn.assistant.reasoning.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var thinkingCollapsedPreview: String {
+        let oneLine = thinkingText
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "  ", with: " ")
+        guard oneLine.count > 110 else { return oneLine }
+        return String(oneLine.prefix(110)).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+    }
+
+    private var thinkingPreview: some View {
+        DisclosureGroup(isExpanded: $isThinkingExpanded) {
+            ScrollView {
+                Text(thinkingText)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+            .frame(maxHeight: 180)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.035))
+            )
+            .padding(.top, 8)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "brain")
+                    .font(.caption)
+                    .foregroundStyle(Color.accentColor)
+                Text(turn.assistant.status == .streaming && turn.assistant.markdown.isEmpty ? "Thinking" : "Model thinking")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if !isThinkingExpanded {
+                    Text(thinkingCollapsedPreview)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+        )
+    }
+
     @ViewBuilder
     private var bodyContent: some View {
         if turn.user.resourceKind.isInteractive {
             interactiveBody
         } else if turn.assistant.markdown.isEmpty && turn.assistant.status == .streaming {
             placeholder
+        } else if turn.assistant.markdown.isEmpty && turn.assistant.status.isTerminal && !thinkingText.isEmpty {
+            Text("The model produced thinking but no final answer.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 4)
         } else {
             MarkdownText(text: turn.assistant.markdown, isStreaming: turn.assistant.status == .streaming)
         }
@@ -215,15 +282,11 @@ struct StudyArtifactCard: View {
     private var statusBadge: some View {
         switch turn.assistant.status {
         case .streaming:
-            if turn.assistant.isDownloading {
-                downloadBadge
-            } else {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Generating")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Working")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         case .done:
             Label("Ready", systemImage: "checkmark.circle.fill")
@@ -239,25 +302,6 @@ struct StudyArtifactCard: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.orange)
         }
-    }
-
-    private var downloadBadge: some View {
-        HStack(spacing: 8) {
-            DownloadProgressMeter(fraction: turn.assistant.downloadProgress)
-                .frame(width: 92)
-            Text(downloadProgressLabel)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 34, alignment: .trailing)
-        }
-    }
-
-    private var downloadProgressLabel: String {
-        guard let fraction = turn.assistant.downloadProgress else {
-            return "..."
-        }
-
-        return "\(Int(fraction * 100))%"
     }
 
     private var placeholder: some View {

@@ -371,6 +371,7 @@ enum SourceContextRenderer {
         chunks: [SourceChunk],
         visualExtracted: [ExtractedSource],
         omittedTextChunkCount: Int,
+        supportsVision: Bool = true,
         extraWarnings: [String] = []
     ) -> SourcePromptContext {
         var blocks = chunks.map { chunk in
@@ -390,6 +391,10 @@ enum SourceContextRenderer {
             omittedImages += extracted.omittedImageCount
             for block in extracted.blocks {
                 guard case .image(let image) = block else { continue }
+                guard supportsVision else {
+                    omittedImages += 1
+                    continue
+                }
                 blocks.append(.image(image))
                 includedImages += 1
                 if !imageFilenames.contains(image.sourceName) {

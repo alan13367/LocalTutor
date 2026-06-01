@@ -5,6 +5,7 @@
 
 import AppKit
 import CoreGraphics
+import CoreImage
 import Foundation
 import Testing
 import ZIPFoundation
@@ -103,6 +104,50 @@ struct SourceExtractorTests {
     }
 
     @Test
+    func docxTextOnlyExtractionSkipsEmbeddedImagesWithoutDecoding() async throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("notes.docx")
+        try makeArchive(at: url, entries: [
+            "word/document.xml": """
+            <w:document xmlns:w="word" xmlns:r="rels" xmlns:a="drawing">
+              <w:body><w:p><w:r><w:t>Hello text-only figure</w:t></w:r><w:r><w:drawing><a:blip r:embed="rId1"/></w:drawing></w:r></w:p></w:body>
+            </w:document>
+            """.data(using: .utf8)!,
+            "word/_rels/document.xml.rels": """
+            <Relationships><Relationship Id="rId1" Target="media/image1.png"/></Relationships>
+            """.data(using: .utf8)!,
+            "word/media/image1.png": Data("not a decodable image".utf8)
+        ])
+
+        let extracted = await SourceExtractor.extract(
+            [StudySource(url: url)],
+            options: SourceExtractionOptions(imageLimit: 0, imageResize: nil, minEmbeddedImageDimension: 64)
+        )
+
+        #expect(extracted.first?.text.contains("Hello text-only figure") == true)
+        #expect(extracted.first?.includedImageCount == 0)
+        #expect(extracted.first?.omittedImageCount == 1)
+        #expect(extracted.first?.warnings.first?.contains("text-only") == true)
+    }
+
+    @Test
+    func standaloneImageTextOnlyExtractionSkipsWithoutDecoding() async throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("broken.png")
+        try Data("not a decodable image".utf8).write(to: url)
+
+        let extracted = await SourceExtractor.extract(
+            [StudySource(url: url)],
+            options: SourceExtractionOptions(imageLimit: 0, imageResize: nil, minEmbeddedImageDimension: 64)
+        )
+
+        #expect(extracted.first?.failureReason == nil)
+        #expect(extracted.first?.includedImageCount == 0)
+        #expect(extracted.first?.omittedImageCount == 1)
+        #expect(extracted.first?.warnings.first?.contains("text-only") == true)
+    }
+
+    @Test
     func pptxExtractsSlidesInPresentationOrder() async throws {
         let directory = try temporaryDirectory()
         let url = directory.appendingPathComponent("deck.pptx")
@@ -197,6 +242,31 @@ struct SourceExtractorTests {
         #expect(content.includedImageCount == 2)
         #expect(content.omittedImageCount == 1)
         #expect(content.benchmarkText.contains("1 additional figure/page was omitted"))
+    }
+
+    @Test
+    func textOnlyPromptDoesNotAdvertiseVisionInputs() throws {
+        let source = StudySource(url: URL(fileURLWithPath: "/tmp/figure.png"))
+        let image = DocumentImage(
+            image: CIImage(color: CIColor(red: 1, green: 0, blue: 0, alpha: 1)).cropped(to: CGRect(x: 0, y: 0, width: 16, height: 16)),
+            sourceName: "figure.png",
+            locator: nil,
+            caption: nil,
+            isStandalone: true,
+            originalSize: CGSize(width: 16, height: 16)
+        )
+        let extracted = [
+            ExtractedSource(source: source, blocks: [.image(image)])
+        ]
+        let user = StudyTurnUser(focus: "Summarize this", resourceKind: .summary, sources: [source], isRefinement: false)
+
+        let content = StudyPromptBuilder.content(for: user, history: [], extracted: extracted, supportsVision: false)
+
+        #expect(content.includedImageCount == 0)
+        #expect(content.omittedImageCount == 1)
+        #expect(content.benchmarkText.contains("[Image:") == false)
+        #expect(content.benchmarkText.contains("Images are provided as separate vision inputs") == false)
+        #expect(content.benchmarkText.contains("text-only model"))
     }
 
     @Test
@@ -532,7 +602,7 @@ struct SourceExtractorTests {
     func largeUnheadedWholeDocumentUsesFastOverviewInsteadOfManyIntermediateCalls() async throws {
         let directory = try temporaryDirectory()
         let url = directory.appendingPathComponent("long-notes.txt")
-        let lines = (1...180).map { index in
+        let lines = (1...520).map { index in
             "Plain study source line \(index) with concepts, examples, dates, and definitions for a broad summary."
         }
         try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)

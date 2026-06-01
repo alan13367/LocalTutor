@@ -57,7 +57,7 @@ struct StudyWorkspaceView: View {
         }
         .fileImporter(
             isPresented: $isImportingSources,
-            allowedContentTypes: StudySource.supportedContentTypes,
+            allowedContentTypes: viewModel.supportedSourceContentTypes,
             allowsMultipleSelection: true
         ) { result in
             switch result {
@@ -96,14 +96,17 @@ struct StudyWorkspaceView: View {
         }
         .overlay(FullWindowDropOverlay(isActive: isDropTargeted))
         .overlay(alignment: .bottomTrailing) {
-            if let status = viewModel.modelDownloadStatus {
-                ModelDownloadToast(status: status) {
-                    viewModel.dismissModelDownloadStatus()
+            ZStack {
+                if let status = viewModel.modelDownloadStatus {
+                    ModelDownloadToast(status: status) {
+                        viewModel.dismissModelDownloadStatus()
+                    }
+                    .padding(.trailing, 24)
+                    .padding(.bottom, 116)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
-                .padding(.trailing, 24)
-                .padding(.bottom, 116)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
+            .animation(.easeOut(duration: 0.18), value: viewModel.modelDownloadStatus != nil)
         }
         .onDrop(
             of: [UTType.fileURL],
@@ -111,7 +114,6 @@ struct StudyWorkspaceView: View {
             perform: viewModel.importFromDropProviders
         )
         .animation(.easeOut(duration: 0.2), value: viewModel.turns.count)
-        .animation(.easeOut(duration: 0.18), value: viewModel.modelDownloadStatus)
     }
 
     private var backgroundGradient: some View {
@@ -277,14 +279,25 @@ private struct StudySidebar: View {
                 }
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(viewModel.activeProfile.name)
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Text("\(viewModel.activeProfile.tierLabel) · \(SystemMemory.totalBytes().gibibytesDescription)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    if let selectedProfile = viewModel.selectedProfile {
+                        Text(selectedProfile.name)
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text("\(selectedProfile.tierLabel) · \(SystemMemory.totalBytes().gibibytesDescription)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text("Choose a model")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text("No model selected")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer(minLength: 4)

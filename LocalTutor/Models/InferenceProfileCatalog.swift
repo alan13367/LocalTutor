@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import MLXLMCommon
 import MLXVLM
 
 enum ModelCatalog {
@@ -15,7 +16,8 @@ enum ModelCatalog {
         kind: .vision,
         tier: .eightGB,
         minimumSystemMemoryBytes: 8.gibibytes,
-        defaults: .vision,
+        defaults: ModelRuntimeDefaults.vision
+            .withDocumentImageLimit(1),
         configuration: .vlm(VLMRegistry.gemma4_E2B_it_4bit),
         publisher: "Google",
         summary: "Compact multimodal tutor. The fastest Gemma 4 build, tuned for Macs with 8 GB unified memory.",
@@ -33,7 +35,7 @@ enum ModelCatalog {
         tier: .sixteenGB,
         minimumSystemMemoryBytes: 16.gibibytes,
         defaults: ModelRuntimeDefaults.vision
-            .withDocumentImageLimit(4)
+            .withDocumentImageLimit(1)
             .withMaxTokens(512)
             .withMaxKVSize(2_048)
             .withPrefillStepSize(64),
@@ -65,18 +67,41 @@ enum ModelCatalog {
         strengths: ["Best-in-class OCR", "Diagrams", "Long answers"]
     )
 
+    static let lfm25A1B8B = ModelProfile(
+        id: "lfm25A1B8B",
+        name: "LFM2.5 8B-A1B",
+        subtitle: "16GB tier, text-only MoE study model",
+        modelIdentifier: "mlx-community/LFM2.5-8B-A1B-MLX-4bit",
+        kind: .text,
+        tier: .sixteenGB,
+        minimumSystemMemoryBytes: 16.gibibytes,
+        defaults: ModelRuntimeDefaults.text
+            .withPrefillStepSize(128),
+        configuration: .llm(
+            ModelConfiguration(
+                id: "mlx-community/LFM2.5-8B-A1B-MLX-4bit",
+                toolCallFormat: .lfm2
+            )
+        ),
+        publisher: "Liquid AI",
+        summary: "Fast text-only MoE model for summaries, explanations, flashcards, and Q&A over readable source text.",
+        parameterScale: "8.3B total / 1.5B active · 4-bit MLX",
+        strengths: ["Text-only", "Long context", "Fast MoE"]
+    )
+
     /// The original v0 catalog. Retained so existing tests keep passing.
     static let v0Catalog: [ModelProfile] = [
         gemma4E2B,
         gemma4E4B
     ]
 
-    /// Full curated catalog shown in Settings. All entries are vision-capable, MLX-format,
-    /// and gated by minimum unified-memory tier.
+    /// Full curated catalog shown in Settings. Entries are MLX-format and gated by
+    /// minimum unified-memory tier.
     static let studyCatalog: [ModelProfile] = [
         gemma4E2B,
         gemma4E4B,
-        qwen3VL4B
+        qwen3VL4B,
+        lfm25A1B8B
     ]
 
     static func profile(withID id: String) -> ModelProfile? {

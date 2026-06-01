@@ -49,7 +49,7 @@ struct ModelDownloadToast: View {
                         Text(progressLabel)
                             .font(.caption2.monospacedDigit().weight(.medium))
                             .foregroundStyle(.secondary)
-                            .frame(width: 34, alignment: .trailing)
+                            .frame(width: 44, alignment: .trailing)
                     }
                 }
             }
@@ -99,7 +99,6 @@ struct ModelDownloadToast: View {
         guard let fraction = status.fraction else {
             return "..."
         }
-        return "\(Int((fraction * 100).rounded(.down)))%"
+        return DownloadProgressUpdate.percentText(for: fraction)
     }
 }
-
