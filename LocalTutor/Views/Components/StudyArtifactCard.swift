@@ -144,6 +144,10 @@ struct StudyArtifactCard: View {
         turn.assistant.reasoning.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var isActivelyThinking: Bool {
+        turn.assistant.status == .streaming && turn.assistant.markdown.isEmpty
+    }
+
     private var thinkingCollapsedPreview: String {
         let oneLine = thinkingText
             .replacingOccurrences(of: "\n", with: " ")
@@ -173,8 +177,9 @@ struct StudyArtifactCard: View {
                 Image(systemName: "brain")
                     .font(.caption)
                     .foregroundStyle(Color.accentColor)
-                Text(turn.assistant.status == .streaming && turn.assistant.markdown.isEmpty ? "Thinking" : "Model thinking")
-                    .font(.caption.weight(.semibold))
+                    .symbolEffect(.pulse, options: .repeating, isActive: isActivelyThinking)
+                Text("Reasoning")
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 if !isThinkingExpanded {
                     Text(thinkingCollapsedPreview)
@@ -184,14 +189,17 @@ struct StudyArtifactCard: View {
                 }
             }
         }
-        .padding(10)
+        .padding(.leading, 12)
+        .padding(.trailing, 10)
+        .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.primary.opacity(0.04))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+                UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10)
+                    .fill(Color.accentColor.opacity(0.5))
+                    .frame(width: 3)
+            }
         )
     }
 
@@ -200,7 +208,9 @@ struct StudyArtifactCard: View {
         if turn.user.resourceKind.isInteractive {
             interactiveBody
         } else if turn.assistant.markdown.isEmpty && turn.assistant.status == .streaming {
-            placeholder
+            if thinkingText.isEmpty {
+                placeholder
+            }
         } else if turn.assistant.markdown.isEmpty && turn.assistant.status.isTerminal && !thinkingText.isEmpty {
             Text("The model produced thinking but no final answer.")
                 .font(.callout)
@@ -282,12 +292,11 @@ struct StudyArtifactCard: View {
     private var statusBadge: some View {
         switch turn.assistant.status {
         case .streaming:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text("Working")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Circle()
+                .fill(Color.accentColor)
+                .frame(width: 8, height: 8)
+                .shadow(color: Color.accentColor.opacity(0.5), radius: 4)
+                .modifier(PulseAnimation())
         case .done:
             Label("Ready", systemImage: "checkmark.circle.fill")
                 .font(.caption.weight(.medium))
@@ -347,6 +356,17 @@ struct StudyArtifactCard: View {
                 CardActionButton(systemImage: "arrow.clockwise", label: "Regenerate", action: onRegenerate)
             }
         }
+    }
+}
+
+private struct PulseAnimation: ViewModifier {
+    @State private var isAnimating = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isAnimating ? 1.0 : 0.4)
+            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isAnimating)
+            .onAppear { isAnimating = true }
     }
 }
 
