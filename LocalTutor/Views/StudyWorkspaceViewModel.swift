@@ -597,17 +597,8 @@ final class StudyWorkspaceViewModel: ObservableObject {
 
     private func handleIntermediate(_ event: LocalModelRunnerEvent, turnID: UUID) {
         switch event {
-        case .stage(let message):
-            if message == LocalModelRunnerStage.preparingPrompt || message == LocalModelRunnerStage.generating {
-                return
-            }
-            updateTurn(turnID) { turn in
-                turn.assistant.statusMessage = message
-                if LocalModelRunnerStage.endsDownloadPhase(message) {
-                    turn.assistant.isDownloading = false
-                    turn.assistant.downloadProgress = nil
-                }
-            }
+        case .stage:
+            return
         case .downloadProgress(let update):
             updateTurn(turnID) { turn in
                 turn.assistant.isDownloading = true

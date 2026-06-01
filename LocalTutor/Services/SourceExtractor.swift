@@ -233,6 +233,10 @@ enum SourceExtractor {
 
             let shouldRender = text.isEmpty || pageLikelyContainsImage(page)
             guard shouldRender else { continue }
+            guard included < options.imageLimit else {
+                omitted += 1
+                continue
+            }
 
             if let rendered = renderPDFPage(page, maxSize: options.imageResize) {
                 appendImage(

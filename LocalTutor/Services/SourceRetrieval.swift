@@ -260,8 +260,70 @@ enum PromptPacker {
         return (packed, compacted)
     }
 
+    static func packForOverview(
+        _ chunks: [SourceChunk],
+        budget: Int
+    ) -> (chunks: [SourceChunk], omitted: Int) {
+        guard !chunks.isEmpty else { return ([], 0) }
+        let grouped = Dictionary(grouping: chunks, by: \.sourceID)
+        let sourceIDs = chunks.map(\.sourceID).reduce(into: [UUID]()) { result, sourceID in
+            if !result.contains(sourceID) {
+                result.append(sourceID)
+            }
+        }
+        let sourceBudget = max(1, budget / max(1, sourceIDs.count))
+        var selected: [SourceChunk] = []
+
+        for sourceID in sourceIDs {
+            let sourceChunks = (grouped[sourceID] ?? []).sorted { $0.ordinal < $1.ordinal }
+            let slotCount = min(sourceChunks.count, max(1, sourceBudget / 140))
+            let tokenBudget = max(1, sourceBudget / max(1, slotCount))
+
+            for index in representativeIndexes(count: sourceChunks.count, slots: slotCount) {
+                let chunk = sourceChunks[index]
+                selected.append(
+                    chunk.estimatedTokenCount > tokenBudget
+                        ? trimmed(chunk, toTokenBudget: tokenBudget)
+                        : chunk
+                )
+            }
+        }
+
+        selected.sort {
+            if $0.sourceName == $1.sourceName {
+                return $0.ordinal < $1.ordinal
+            }
+            return $0.sourceName < $1.sourceName
+        }
+        return (selected, max(0, chunks.count - selected.count))
+    }
+
     static func fits(_ chunks: [SourceChunk], budget: Int) -> Bool {
         totalTokenEstimate(chunks) <= budget
+    }
+
+    private static func representativeIndexes(count: Int, slots: Int) -> [Int] {
+        guard count > 0, slots > 0 else { return [] }
+        guard slots < count else { return Array(0..<count) }
+        guard slots > 1 else { return [0] }
+
+        var indexes: [Int] = []
+        for position in 0..<slots {
+            let raw = Double(position) * Double(count - 1) / Double(slots - 1)
+            let index = min(count - 1, max(0, Int(raw.rounded())))
+            if !indexes.contains(index) {
+                indexes.append(index)
+            }
+        }
+
+        var candidate = 0
+        while indexes.count < slots, candidate < count {
+            if !indexes.contains(candidate) {
+                indexes.append(candidate)
+            }
+            candidate += 1
+        }
+        return indexes.sorted()
     }
 
     private static func totalTokenEstimate(_ chunks: [SourceChunk]) -> Int {

@@ -19,6 +19,7 @@ enum SourceContextPlannerError: LocalizedError {
 enum SourceContextPlanner {
     typealias IntermediateGenerator = @Sendable (_ content: StudyPromptContent, _ maxTokens: Int?, _ temperature: Float?) async throws -> String
     typealias StatusHandler = @Sendable (_ message: String) async -> Void
+    static let maxIntermediateDistillationGroups = 6
 
     static func content(
         for user: StudyTurnUser,
@@ -47,7 +48,11 @@ enum SourceContextPlanner {
         status: StatusHandler
     ) async throws -> StudyPromptContent {
         await status("Indexing sources")
-        let prepared = await prepareSources(user.sources, runtimePolicy: runtimePolicy)
+        let prepared = try await prepareSources(
+            user.sources,
+            runtimePolicy: runtimePolicy,
+            status: status
+        )
         let budget = PromptPacker.promptBudget(for: runtimePolicy, resourceKind: user.resourceKind)
         let chunks = prepared.indexes.flatMap(\.chunks).sorted { lhs, rhs in
             if lhs.sourceName == rhs.sourceName { return lhs.ordinal < rhs.ordinal }
@@ -124,7 +129,7 @@ enum SourceContextPlanner {
 
     private static func sectionGroupingKey(for chunk: SourceChunk) -> String {
         guard let firstHeading = chunk.headingPath.first else {
-            return "\(chunk.sourceName)-\(chunk.ordinal)"
+            return "\(chunk.sourceName)-unheaded"
         }
         if firstHeading.hasPrefix("# "), chunk.headingPath.count > 1 {
             return chunk.headingPath[1]
@@ -155,13 +160,16 @@ enum SourceContextPlanner {
 
     private static func prepareSources(
         _ sources: [StudySource],
-        runtimePolicy: ModelRuntimePolicy
-    ) async -> (indexes: [SourceIndex], visualExtracted: [ExtractedSource]) {
+        runtimePolicy: ModelRuntimePolicy,
+        status: StatusHandler
+    ) async throws -> (indexes: [SourceIndex], visualExtracted: [ExtractedSource]) {
         var indexes: [SourceIndex] = []
         var visualExtracted: [ExtractedSource] = []
         var remainingImages = runtimePolicy.documentImageLimit
 
-        for source in sources {
+        for (index, source) in sources.enumerated() {
+            try Task.checkCancellation()
+            await status("Reading source \(index + 1) of \(sources.count): \(statusName(for: source))")
             let cached = await SourceIndexStore.shared.cachedIndex(for: source)
             if let cached {
                 indexes.append(cached.rebased(to: source))
@@ -186,6 +194,12 @@ enum SourceContextPlanner {
         }
 
         return (indexes, visualExtracted)
+    }
+
+    private static func statusName(for source: StudySource) -> String {
+        let name = source.displayName
+        guard name.count > 38 else { return name }
+        return "\(name.prefix(26))...\(name.suffix(8))"
     }
 
     private static func wholeDocumentContext(
@@ -225,6 +239,20 @@ enum SourceContextPlanner {
                 omittedTextChunkCount: 0,
                 extraWarnings: packed.compactedChunkCount == 0 ? [] : [
                     "\(packed.compactedChunkCount) source chunk\(packed.compactedChunkCount == 1 ? "" : "s") were compacted proportionally to keep the whole document in one model call."
+                ]
+            )
+        }
+
+        let groups = sectionGroups(for: chunks, budget: budget)
+        if groups.count > maxIntermediateDistillationGroups {
+            let packed = PromptPacker.packForOverview(chunks, budget: budget)
+            return SourceContextRenderer.context(
+                title: "Fast source overview selected.",
+                chunks: packed.chunks,
+                visualExtracted: visualExtracted,
+                omittedTextChunkCount: packed.omitted,
+                extraWarnings: [
+                    "LocalTutor used a fast overview instead of \(groups.count) intermediate summarization passes. Ask a targeted question for more detail on a specific source or section."
                 ]
             )
         }
@@ -369,7 +397,7 @@ enum SourceContextPlanner {
 
         for (index, group) in groups.enumerated() {
             try Task.checkCancellation()
-            await status("Summarizing section \(index + 1) of \(groups.count)")
+            await status("Summarizing source group \(index + 1) of \(groups.count)")
             let prompt = intermediatePrompt(
                 user: user,
                 history: history,

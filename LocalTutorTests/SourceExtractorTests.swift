@@ -63,6 +63,21 @@ struct SourceExtractorTests {
     }
 
     @Test
+    func scannedPDFRespectsImageLimitAcrossPages() async throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("multi-page-scan.pdf")
+        try scannedPDFData(pageCount: 3).write(to: url)
+
+        let extracted = await SourceExtractor.extract(
+            [StudySource(url: url)],
+            options: SourceExtractionOptions(imageLimit: 1, imageResize: CGSize(width: 1024, height: 1024), minEmbeddedImageDimension: 64)
+        )
+
+        #expect(extracted.first?.includedImageCount == 1)
+        #expect(extracted.first?.omittedImageCount == 2)
+    }
+
+    @Test
     func docxExtractsTextAndInlineImage() async throws {
         let directory = try temporaryDirectory()
         let url = directory.appendingPathComponent("notes.docx")
@@ -449,6 +464,28 @@ struct SourceExtractorTests {
     }
 
     @Test
+    func promptPackerOverviewSamplesAcrossSources() throws {
+        let firstID = UUID()
+        let secondID = UUID()
+        let first = (1...6).map { index in
+            SourceChunk(id: "a\(index)", sourceID: firstID, sourceName: "first.pdf", locator: "page \(index)", headingPath: [], ordinal: index, text: String(repeating: "First source page \(index). ", count: 80), estimatedTokenCount: 220)
+        }
+        let second = (1...6).map { index in
+            SourceChunk(id: "b\(index)", sourceID: secondID, sourceName: "second.pdf", locator: "page \(index)", headingPath: [], ordinal: index, text: String(repeating: "Second source page \(index). ", count: 80), estimatedTokenCount: 220)
+        }
+
+        let packed = PromptPacker.packForOverview(first + second, budget: 600)
+
+        #expect(packed.chunks.count == 4)
+        #expect(packed.omitted == 8)
+        #expect(packed.chunks.contains { $0.sourceName == "first.pdf" && $0.ordinal == 1 })
+        #expect(packed.chunks.contains { $0.sourceName == "first.pdf" && $0.ordinal == 6 })
+        #expect(packed.chunks.contains { $0.sourceName == "second.pdf" && $0.ordinal == 1 })
+        #expect(packed.chunks.contains { $0.sourceName == "second.pdf" && $0.ordinal == 6 })
+        #expect(PromptPacker.fits(packed.chunks, budget: 600))
+    }
+
+    @Test
     func modestWholeDocumentOverflowAvoidsIntermediateModelCalls() async throws {
         let directory = try temporaryDirectory()
         let url = directory.appendingPathComponent("roadmap.md")
@@ -492,6 +529,35 @@ struct SourceExtractorTests {
     }
 
     @Test
+    func largeUnheadedWholeDocumentUsesFastOverviewInsteadOfManyIntermediateCalls() async throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("long-notes.txt")
+        let lines = (1...180).map { index in
+            "Plain study source line \(index) with concepts, examples, dates, and definitions for a broad summary."
+        }
+        try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+
+        let counter = IntermediateCallCounter()
+        let source = StudySource(url: url)
+        let user = StudyTurnUser(focus: "", resourceKind: .summary, sources: [source], isRefinement: false)
+
+        let content = try await SourceContextPlanner.content(
+            for: user,
+            history: [],
+            profile: .gemma4E4B,
+            generateIntermediate: { _, _, _ in
+                await counter.increment()
+                return "intermediate"
+            },
+            status: { _ in }
+        )
+
+        #expect(await counter.value == 0)
+        #expect(content.benchmarkText.contains("Fast source overview selected."))
+        #expect(content.benchmarkText.contains("fast overview"))
+    }
+
+    @Test
     func wholeDocumentGroupingUsesSectionsBeforeSynthesis() throws {
         let sourceID = UUID()
         let chunks = [
@@ -505,6 +571,18 @@ struct SourceExtractorTests {
         #expect(groups.count == 2)
         #expect(groups[0].count == 2)
         #expect(groups[1].first?.headingPath == ["5 Training"])
+    }
+
+    @Test
+    func wholeDocumentGroupingBatchesUnheadedChunksByBudget() throws {
+        let sourceID = UUID()
+        let chunks = (1...5).map { index in
+            SourceChunk(id: "\(index)", sourceID: sourceID, sourceName: "paper.pdf", locator: "page \(index)", headingPath: [], ordinal: index, text: "Page \(index)", estimatedTokenCount: 100)
+        }
+
+        let groups = SourceContextPlanner.sectionGroups(for: chunks, budget: 250)
+
+        #expect(groups.map(\.count) == [2, 2, 1])
     }
 
     @Test
@@ -576,19 +654,21 @@ struct SourceExtractorTests {
         return data
     }
 
-    private func scannedPDFData() throws -> Data {
+    private func scannedPDFData(pageCount: Int = 1) throws -> Data {
         let data = NSMutableData()
         var mediaBox = CGRect(x: 0, y: 0, width: 300, height: 400)
         guard let consumer = CGDataConsumer(data: data),
               let context = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) else {
             throw CocoaError(.fileWriteUnknown)
         }
-        context.beginPDFPage(nil)
-        context.setFillColor(NSColor.white.cgColor)
-        context.fill(mediaBox)
-        context.setFillColor(NSColor.black.cgColor)
-        context.fill(CGRect(x: 40, y: 160, width: 220, height: 80))
-        context.endPDFPage()
+        for _ in 0..<pageCount {
+            context.beginPDFPage(nil)
+            context.setFillColor(NSColor.white.cgColor)
+            context.fill(mediaBox)
+            context.setFillColor(NSColor.black.cgColor)
+            context.fill(CGRect(x: 40, y: 160, width: 220, height: 80))
+            context.endPDFPage()
+        }
         context.closePDF()
         return data as Data
     }
