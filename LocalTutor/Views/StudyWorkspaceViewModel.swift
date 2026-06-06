@@ -28,6 +28,8 @@ struct ModelDownloadStatus: Equatable {
 @MainActor
 final class StudyWorkspaceViewModel: ObservableObject {
     private static let noSelectedProfileID = "__localtutor_no_selected_profile__"
+    private static let streamFlushNanoseconds: UInt64 = 40_000_000
+    private static let cacheInfoRefreshMinimumInterval: TimeInterval = 5
 
     // Persisted study-session history. Each session owns its own sources + turns.
     @Published private(set) var sessions: [StudySession] = []
@@ -55,12 +57,18 @@ final class StudyWorkspaceViewModel: ObservableObject {
     private var modelPreloadProfileID: String?
     private var modelDownloadDismissTask: Task<Void, Never>?
     private var modelCacheRefreshTask: Task<Void, Never>?
+    private var modelCacheInfoLoadedAt: Date?
     private var hasLoaded = false
 
     // Streaming coalescing: buffer tokens and flush to the UI on a frame cadence
     // instead of mutating published state on every single token.
     private var pendingChunks: String = ""
     private var flushScheduled = false
+    private var pendingReasoningChunks: String = ""
+    private var reasoningFlushScheduled = false
+    private var runningTurnID: UUID?
+    private var runningSessionIndex: Int?
+    private var runningTurnIndex: Int?
 
     init(
         inferenceService: any InferenceService = LocalModelRunner(),
@@ -95,7 +103,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
         sessions = loaded
         currentSessionID = loaded[0].id
         hasLoaded = true
-        refreshModelCacheInfo()
+        refreshModelCacheInfo(force: true)
     }
 
     // MARK: - Current session access
@@ -219,7 +227,16 @@ final class StudyWorkspaceViewModel: ObservableObject {
         objectWillChange.send()
     }
 
-    func refreshModelCacheInfo() {
+    func refreshModelCacheInfo(force: Bool = false) {
+        if !force,
+           let modelCacheInfoLoadedAt,
+           Date().timeIntervalSince(modelCacheInfoLoadedAt) < Self.cacheInfoRefreshMinimumInterval {
+            return
+        }
+        if !force, modelCacheRefreshTask != nil {
+            return
+        }
+
         modelCacheRefreshTask?.cancel()
         let profiles = ModelProfile.studyCatalog
         let cacheInfoProvider = cacheInfoProvider
@@ -228,6 +245,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 self?.modelCacheInfoByProfileID = cacheInfo
+                self?.modelCacheInfoLoadedAt = Date()
                 self?.modelCacheRefreshTask = nil
             }
         }
@@ -420,13 +438,14 @@ final class StudyWorkspaceViewModel: ObservableObject {
             fraction: 1,
             phase: .ready
         )
-        refreshModelCacheInfo()
+        refreshModelCacheInfo(force: true)
         scheduleModelDownloadDismiss()
     }
 
     private func completeCachedModelRemoval(_ profile: ModelProfile, result: ModelCacheRemovalResult) {
         removingModelProfileIDs.remove(profile.id)
         modelCacheInfoByProfileID[profile.id] = .empty
+        modelCacheInfoLoadedAt = Date()
         modelDownloadStatus = ModelDownloadStatus(
             profileID: profile.id,
             profileName: profile.name,
@@ -446,7 +465,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
             fraction: nil,
             phase: .failed
         )
-        refreshModelCacheInfo()
+        refreshModelCacheInfo(force: true)
     }
 
     private func failModelPreload(for profile: ModelProfile, error: Error) {
@@ -696,7 +715,14 @@ final class StudyWorkspaceViewModel: ObservableObject {
 
         pendingChunks = ""
         flushScheduled = false
+        pendingReasoningChunks = ""
+        reasoningFlushScheduled = false
         runningSessionID = sessionID
+        runningTurnID = turnID
+        runningSessionIndex = currentIndex
+        runningTurnIndex = runningSessionIndex.flatMap { sessionIndex in
+            sessions[sessionIndex].turns.firstIndex { $0.id == turnID }
+        }
 
         runTask = Task { [weak self] in
             guard let self else { return }
@@ -779,10 +805,8 @@ final class StudyWorkspaceViewModel: ObservableObject {
         case .downloadProgress:
             return
         case .reasoningChunk(let chunk):
-            updateTurn(turnID) { turn in
-                turn.assistant.reasoning += chunk
-                turn.assistant.statusMessage = "Thinking"
-            }
+            pendingReasoningChunks += chunk
+            scheduleReasoningFlush(turnID: turnID)
         case .outputChunk:
             break
         }
@@ -793,10 +817,25 @@ final class StudyWorkspaceViewModel: ObservableObject {
     private func updateTurn(_ turnID: UUID, _ body: (inout StudyTurn) -> Void) {
         // No scheduleSave here: this runs up to ~25x/sec while streaming. Persistence
         // is handled at terminal points (finish/fail) and on structural changes.
+        if turnID == runningTurnID,
+           let sIdx = runningSessionIndex,
+           sessions.indices.contains(sIdx),
+           let tIdx = runningTurnIndex,
+           sessions[sIdx].turns.indices.contains(tIdx),
+           sessions[sIdx].turns[tIdx].id == turnID {
+            body(&sessions[sIdx].turns[tIdx])
+            sessions[sIdx].updatedAt = Date()
+            return
+        }
+
         for sIdx in sessions.indices {
             if let tIdx = sessions[sIdx].turns.firstIndex(where: { $0.id == turnID }) {
                 body(&sessions[sIdx].turns[tIdx])
                 sessions[sIdx].updatedAt = Date()
+                if turnID == runningTurnID {
+                    runningSessionIndex = sIdx
+                    runningTurnIndex = tIdx
+                }
                 return
             }
         }
@@ -822,10 +861,8 @@ final class StudyWorkspaceViewModel: ObservableObject {
         case .downloadProgress:
             return
         case .reasoningChunk(let chunk):
-            updateTurn(turnID) { turn in
-                turn.assistant.reasoning += chunk
-                turn.assistant.statusMessage = "Thinking"
-            }
+            pendingReasoningChunks += chunk
+            scheduleReasoningFlush(turnID: turnID)
         case .outputChunk(let chunk):
             pendingChunks += chunk
             updateStatusIfStreaming(turnID: turnID, message: "Writing answer")
@@ -837,7 +874,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
         guard !flushScheduled else { return }
         flushScheduled = true
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 40_000_000) // ~25 fps
+            try? await Task.sleep(nanoseconds: Self.streamFlushNanoseconds)
             self?.flushPending(turnID: turnID, kind: kind)
         }
     }
@@ -851,6 +888,28 @@ final class StudyWorkspaceViewModel: ObservableObject {
             turn.assistant.markdown += chunk
             if kind.isInteractive {
                 turn.assistant.statusMessage = Self.interactiveProgressMessage(for: kind, raw: turn.assistant.markdown)
+            }
+        }
+    }
+
+    private func scheduleReasoningFlush(turnID: UUID) {
+        guard !reasoningFlushScheduled else { return }
+        reasoningFlushScheduled = true
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.streamFlushNanoseconds)
+            self?.flushPendingReasoning(turnID: turnID)
+        }
+    }
+
+    private func flushPendingReasoning(turnID: UUID) {
+        reasoningFlushScheduled = false
+        guard !pendingReasoningChunks.isEmpty else { return }
+        let chunk = pendingReasoningChunks
+        pendingReasoningChunks = ""
+        updateTurn(turnID) { turn in
+            turn.assistant.reasoning += chunk
+            if turn.assistant.status == .streaming {
+                turn.assistant.statusMessage = "Thinking"
             }
         }
     }
@@ -869,15 +928,14 @@ final class StudyWorkspaceViewModel: ObservableObject {
     }
 
     private func finish(record: BenchmarkRecord, turnID: UUID) {
-        // Drain any buffered tokens before settling the turn.
-        let pending = pendingChunks
-        pendingChunks = ""
-        flushScheduled = false
-        runningSessionID = nil
+        let drained = drainPendingBuffers()
 
         updateTurn(turnID) { turn in
-            if !pending.isEmpty {
-                turn.assistant.markdown += pending
+            if !drained.chunks.isEmpty {
+                turn.assistant.markdown += drained.chunks
+            }
+            if !drained.reasoning.isEmpty {
+                turn.assistant.reasoning += drained.reasoning
             }
             if turn.assistant.markdown.isEmpty {
                 turn.assistant.markdown = record.output
@@ -908,35 +966,57 @@ final class StudyWorkspaceViewModel: ObservableObject {
                 turn.assistant.statusMessage = "Skipped"
             }
         }
+        clearRunningTurnCache()
         scheduleSave()
     }
 
     private func fail(turnID: UUID, message: String) {
-        pendingChunks = ""
-        flushScheduled = false
-        runningSessionID = nil
+        let drained = drainPendingBuffers()
         updateTurn(turnID) { turn in
+            if !drained.reasoning.isEmpty {
+                turn.assistant.reasoning += drained.reasoning
+            }
             turn.assistant.status = .failed(message)
             turn.assistant.statusMessage = "Failed"
             turn.assistant.finishedAt = Date()
             turn.assistant.isDownloading = false
             turn.assistant.downloadProgress = nil
         }
+        clearRunningTurnCache()
         scheduleSave()
     }
 
     private func cancel(turnID: UUID) {
-        pendingChunks = ""
-        flushScheduled = false
-        runningSessionID = nil
+        let drained = drainPendingBuffers()
         updateTurn(turnID) { turn in
+            if !drained.reasoning.isEmpty {
+                turn.assistant.reasoning += drained.reasoning
+            }
             turn.assistant.status = .cancelled
             turn.assistant.statusMessage = "Cancelled"
             turn.assistant.finishedAt = Date()
             turn.assistant.isDownloading = false
             turn.assistant.downloadProgress = nil
         }
+        clearRunningTurnCache()
         scheduleSave()
+    }
+
+    private func drainPendingBuffers() -> (chunks: String, reasoning: String) {
+        let chunks = pendingChunks
+        let reasoning = pendingReasoningChunks
+        pendingChunks = ""
+        flushScheduled = false
+        pendingReasoningChunks = ""
+        reasoningFlushScheduled = false
+        runningSessionID = nil
+        return (chunks, reasoning)
+    }
+
+    private func clearRunningTurnCache() {
+        runningTurnID = nil
+        runningSessionIndex = nil
+        runningTurnIndex = nil
     }
 
     // MARK: - Persistence
@@ -956,11 +1036,16 @@ final class StudyWorkspaceViewModel: ObservableObject {
     private func scheduleSave() {
         guard hasLoaded else { return }
         saveTask?.cancel()
-        let snapshot = sessions
-        saveTask = Task { [store] in
+        saveTask = Task { [weak self, store] in
             try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            guard let snapshot = await self?.snapshotForSaving() else { return }
             guard !Task.isCancelled else { return }
             await store.save(snapshot)
         }
+    }
+
+    private func snapshotForSaving() -> [StudySession] {
+        sessions
     }
 }

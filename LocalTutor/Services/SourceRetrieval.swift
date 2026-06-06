@@ -21,6 +21,8 @@ struct SourceRetrievalResult: Sendable {
 }
 
 enum SourceRetriever {
+    private static let tokenCache = SourceTokenCache()
+
     static func retrieve(query: String, indexes: [SourceIndex]) -> SourceRetrievalResult {
         let allChunks = indexes.flatMap(\.chunks)
         let queryTerms = tokenize(query)
@@ -119,8 +121,7 @@ enum SourceRetriever {
     }
 
     private static func numberedReferences(in query: String) -> [(label: String, number: String)] {
-        let pattern = #"\b(phase|section|chapter|part|step)\s+(\d+(?:\.\d+)*)\b"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+        guard let regex = numberedReferenceRegex else {
             return []
         }
         let range = NSRange(query.startIndex..<query.endIndex, in: query)
@@ -154,11 +155,24 @@ enum SourceRetriever {
     }
 
     private static func normalizeHeading(_ heading: String) -> String {
-        heading
-            .lowercased()
-            .replacingOccurrences(of: #"^#{1,6}\s+"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var normalized = heading.lowercased()
+        if let markdownHeadingPrefixRegex {
+            let range = NSRange(normalized.startIndex..<normalized.endIndex, in: normalized)
+            normalized = markdownHeadingPrefixRegex.stringByReplacingMatches(
+                in: normalized,
+                range: range,
+                withTemplate: ""
+            )
+        }
+        if let whitespaceRegex {
+            let range = NSRange(normalized.startIndex..<normalized.endIndex, in: normalized)
+            normalized = whitespaceRegex.stringByReplacingMatches(
+                in: normalized,
+                range: range,
+                withTemplate: " "
+            )
+        }
+        return normalized.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func bm25(queryTerms: [String], chunks: [SourceChunk]) -> [(chunk: SourceChunk, score: Double)] {
@@ -166,12 +180,12 @@ enum SourceRetriever {
             return chunks.map { ($0, 0) }
         }
 
-        let tokenized = chunks.map { tokenize($0.text + " " + $0.headingPath.joined(separator: " ")) }
+        let tokenized = chunks.map(tokenData)
         let docCount = Double(chunks.count)
-        let averageLength = max(1.0, Double(tokenized.reduce(0) { $0 + $1.count }) / docCount)
+        let averageLength = max(1.0, Double(tokenized.reduce(0) { $0 + $1.terms.count }) / docCount)
         var documentFrequency: [String: Int] = [:]
-        for terms in tokenized {
-            for term in Set(terms) {
+        for data in tokenized {
+            for term in data.uniqueTerms {
                 documentFrequency[term, default: 0] += 1
             }
         }
@@ -179,11 +193,10 @@ enum SourceRetriever {
         let k1 = 1.5
         let b = 0.75
         return chunks.enumerated().map { index, chunk in
-            let terms = tokenized[index]
-            let length = Double(max(1, terms.count))
-            let counts = Dictionary(terms.map { ($0, 1) }, uniquingKeysWith: +)
+            let data = tokenized[index]
+            let length = Double(max(1, data.terms.count))
             let score = queryTerms.reduce(0.0) { total, term in
-                let frequency = Double(counts[term, default: 0])
+                let frequency = Double(data.counts[term, default: 0])
                 guard frequency > 0 else { return total }
                 let df = Double(documentFrequency[term, default: 0])
                 let idf = log((docCount - df + 0.5) / (df + 0.5) + 1)
@@ -194,11 +207,76 @@ enum SourceRetriever {
         }
     }
 
+    private static func tokenData(for chunk: SourceChunk) -> SourceTokenData {
+        let searchableText = chunk.text + " " + chunk.headingPath.joined(separator: " ")
+        // hashValue is randomised per process — fine for this in-memory-only cache.
+        let key = SourceTokenCache.Key(
+            chunkID: chunk.id,
+            estimatedTokenCount: chunk.estimatedTokenCount,
+            textCount: searchableText.count,
+            textHash: searchableText.hashValue
+        )
+        return tokenCache.value(for: key) {
+            let terms = tokenize(searchableText)
+            return SourceTokenData(
+                terms: terms,
+                counts: Dictionary(terms.map { ($0, 1) }, uniquingKeysWith: +),
+                uniqueTerms: Set(terms)
+            )
+        }
+    }
+
     private static func sourceOrder(_ lhs: SourceChunk, _ rhs: SourceChunk) -> Bool {
         if lhs.sourceName == rhs.sourceName {
             return lhs.ordinal < rhs.ordinal
         }
         return lhs.sourceName < rhs.sourceName
+    }
+
+    private static let numberedReferenceRegex = try? NSRegularExpression(
+        pattern: #"\b(phase|section|chapter|part|step)\s+(\d+(?:\.\d+)*)\b"#,
+        options: [.caseInsensitive]
+    )
+    private static let markdownHeadingPrefixRegex = try? NSRegularExpression(pattern: #"^#{1,6}\s+"#)
+    private static let whitespaceRegex = try? NSRegularExpression(pattern: #"\s+"#)
+}
+
+private struct SourceTokenData {
+    var terms: [String]
+    var counts: [String: Int]
+    var uniqueTerms: Set<String>
+}
+
+private final class SourceTokenCache: @unchecked Sendable {
+    struct Key: Hashable {
+        var chunkID: String
+        var estimatedTokenCount: Int
+        var textCount: Int
+        var textHash: Int
+    }
+
+    private let lock = NSLock()
+    private var values: [Key: SourceTokenData] = [:]
+
+    // Concurrent callers may compute the same key in parallel (benign duplication);
+    // the cache is a pure performance optimisation with no correctness requirements.
+    func value(for key: Key, make: () -> SourceTokenData) -> SourceTokenData {
+        lock.lock()
+        if let value = values[key] {
+            lock.unlock()
+            return value
+        }
+        lock.unlock()
+
+        let value = make()
+
+        lock.lock()
+        if values.count >= 2_000 {
+            values.removeAll(keepingCapacity: true)
+        }
+        values[key] = value
+        lock.unlock()
+        return value
     }
 }
 
@@ -339,17 +417,23 @@ enum PromptPacker {
             min(chunk.estimatedTokenCount, max(floor, Int((Double(chunk.estimatedTokenCount) / Double(total) * Double(budget)).rounded(.down))))
         }
 
-        while allocations.reduce(0, +) > budget,
+        var allocationTotal = allocations.reduce(0, +)
+
+        while allocationTotal > budget,
               let index = allocations.indices.max(by: { allocations[$0] < allocations[$1] }),
               allocations[index] > 1 {
-            let excess = allocations.reduce(0, +) - budget
+            let excess = allocationTotal - budget
             let reducible = max(1, allocations[index] - 1)
-            allocations[index] -= min(excess, reducible)
+            let reduction = min(excess, reducible)
+            allocations[index] -= reduction
+            allocationTotal -= reduction
         }
 
-        while allocations.reduce(0, +) < budget,
+        while allocationTotal < budget,
               let index = chunks.indices.first(where: { allocations[$0] < chunks[$0].estimatedTokenCount }) {
-            allocations[index] += 1
+            let gap = min(budget - allocationTotal, chunks[index].estimatedTokenCount - allocations[index])
+            allocations[index] += gap
+            allocationTotal += gap
         }
 
         return allocations

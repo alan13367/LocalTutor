@@ -95,16 +95,15 @@ enum SourceIndexBuilder {
     ) -> [SourceChunk] {
         var chunks: [SourceChunk] = []
         var headingStack: [SourceHeading] = []
-        var buffer: [String] = []
+        var bufferText = ""
         var locators: [String] = []
         var ordinal = 0
 
         func flush() {
-            let text = buffer
-                .joined(separator: "\n")
+            let text = bufferText
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else {
-                buffer.removeAll()
+                bufferText.removeAll(keepingCapacity: true)
                 locators.removeAll()
                 return
             }
@@ -122,8 +121,17 @@ enum SourceIndexBuilder {
                     estimatedTokenCount: PromptTokenEstimator.estimate(text)
                 )
             )
-            buffer.removeAll()
+            bufferText.removeAll(keepingCapacity: true)
             locators.removeAll()
+        }
+
+        func appendLine(_ line: String) {
+            if bufferText.isEmpty {
+                bufferText = line
+            } else {
+                bufferText.append("\n")
+                bufferText.append(line)
+            }
         }
 
         for unit in units {
@@ -133,8 +141,8 @@ enum SourceIndexBuilder {
 
             for line in lines {
                 guard !line.isEmpty else {
-                    if !buffer.isEmpty {
-                        buffer.append("")
+                    if !bufferText.isEmpty {
+                        bufferText.append("\n")
                     }
                     continue
                 }
@@ -143,19 +151,19 @@ enum SourceIndexBuilder {
                     flush()
                     headingStack.removeAll { $0.level >= heading.level }
                     headingStack.append(heading)
-                    buffer.append(line)
+                    appendLine(line)
                     if let locator = unit.locator {
                         locators.append(locator)
                     }
                     continue
                 }
 
-                buffer.append(line)
+                appendLine(line)
                 if let locator = unit.locator {
                     locators.append(locator)
                 }
 
-                if PromptTokenEstimator.estimate(buffer.joined(separator: "\n")) >= targetChunkTokens {
+                if PromptTokenEstimator.estimateNonEmptyTrimmedCharacterCount(bufferText.count) >= targetChunkTokens {
                     flush()
                 }
             }
@@ -180,8 +188,7 @@ enum SourceIndexBuilder {
     }
 
     private static func pageNumber(in locator: String) -> Int? {
-        let pattern = #"\bpage\s+(\d+)\b"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+        guard let regex = pageNumberRegex else {
             return nil
         }
         let range = NSRange(locator.startIndex..<locator.endIndex, in: locator)
@@ -192,6 +199,11 @@ enum SourceIndexBuilder {
         }
         return Int(locator[numberRange])
     }
+
+    private static let pageNumberRegex = try? NSRegularExpression(
+        pattern: #"\bpage\s+(\d+)\b"#,
+        options: [.caseInsensitive]
+    )
 }
 
 struct SourceTextUnit: Equatable, Sendable {
@@ -243,8 +255,7 @@ struct SourceHeading: Equatable, Sendable {
     }
 
     private static func parseMarkdownHeading(_ line: String) -> SourceHeading? {
-        let pattern = #"^(#{1,6})\s+(.+?)\s*#*$"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        guard let regex = markdownHeadingRegex else { return nil }
         let range = NSRange(line.startIndex..<line.endIndex, in: line)
         guard let match = regex.firstMatch(in: line, range: range),
               match.numberOfRanges == 3,
@@ -261,8 +272,7 @@ struct SourceHeading: Equatable, Sendable {
     }
 
     private static func parseNumberedHeading(_ line: String) -> SourceHeading? {
-        let pattern = #"^(\d+(?:\.\d+)*)\s+([^\d].{1,120})$"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        guard let regex = numberedHeadingRegex else { return nil }
         let range = NSRange(line.startIndex..<line.endIndex, in: line)
         guard let match = regex.firstMatch(in: line, range: range),
               match.numberOfRanges == 3,
@@ -275,6 +285,9 @@ struct SourceHeading: Equatable, Sendable {
         guard !title.hasSuffix(".") else { return nil }
         return SourceHeading(number: String(line[numberRange]), title: title)
     }
+
+    private static let markdownHeadingRegex = try? NSRegularExpression(pattern: #"^(#{1,6})\s+(.+?)\s*#*$"#)
+    private static let numberedHeadingRegex = try? NSRegularExpression(pattern: #"^(\d+(?:\.\d+)*)\s+([^\d].{1,120})$"#)
 }
 
 enum PromptTokenEstimator {
@@ -283,7 +296,11 @@ enum PromptTokenEstimator {
     static func estimate(_ text: String) -> Int {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return 0 }
-        return max(1, (trimmed.count + charactersPerToken - 1) / charactersPerToken)
+        return estimateNonEmptyTrimmedCharacterCount(trimmed.count)
+    }
+
+    static func estimateNonEmptyTrimmedCharacterCount(_ count: Int) -> Int {
+        max(1, (count + charactersPerToken - 1) / charactersPerToken)
     }
 
     static func characterLimit(forTokenBudget budget: Int) -> Int {
@@ -295,9 +312,18 @@ actor SourceIndexStore {
     static let shared = SourceIndexStore()
 
     private let fileManager: FileManager
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        self.encoder = encoder
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        self.decoder = decoder
     }
 
     func cachedIndex(for source: StudySource) -> SourceIndex? {
@@ -305,7 +331,7 @@ actor SourceIndexStore {
         let url = cacheURL(for: fingerprint)
         guard fileManager.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url),
-              let index = try? JSONDecoder.localTutorSourceIndex.decode(SourceIndex.self, from: data),
+              let index = try? decoder.decode(SourceIndex.self, from: data),
               index.fingerprint == fingerprint else {
             return nil
         }
@@ -315,7 +341,7 @@ actor SourceIndexStore {
     func store(_ index: SourceIndex) {
         let url = cacheURL(for: index.fingerprint)
         do {
-            let data = try JSONEncoder.localTutorSourceIndex.encode(index)
+            let data = try encoder.encode(index)
             try data.write(to: url, options: [.atomic])
         } catch {
             // Source indexes are disposable caches; failed writes should not
@@ -351,21 +377,5 @@ actor SourceIndexStore {
     private static func digestHex(_ data: Data) -> String {
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
-    }
-}
-
-private extension JSONEncoder {
-    static var localTutorSourceIndex: JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }
-}
-
-private extension JSONDecoder {
-    static var localTutorSourceIndex: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
     }
 }

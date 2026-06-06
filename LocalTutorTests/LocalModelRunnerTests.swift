@@ -295,6 +295,38 @@ struct LocalModelRunnerTests {
     }
 
     @Test
+    func reasoningOutputFilterTreatsGemmaThoughtChannelAsReasoning() {
+        let raw = """
+        <|channel>thought
+        internal reasoning
+        <|channel>final# Final answer
+        Study this.
+        """
+
+        #expect(ReasoningOutputFilter.sanitize(raw) == "# Final answer\nStudy this.")
+    }
+
+    @Test
+    func reasoningOutputFilterBuffersSplitGemmaThoughtChannelWhileStreaming() {
+        var filter = ReasoningOutputFilter()
+
+        #expect(filter.append("<|chan") == ReasoningOutputFilter.Chunk())
+        #expect(filter.append("nel>thought hidden") == ReasoningOutputFilter.Chunk(reasoning: " hidden"))
+        #expect(filter.append("<|channel>fi") == ReasoningOutputFilter.Chunk())
+        #expect(filter.append("nalVisible") == ReasoningOutputFilter.Chunk(visible: "Visible"))
+        #expect(filter.finish() == ReasoningOutputFilter.Chunk())
+    }
+
+    @Test
+    func reasoningOutputFilterTreatsGemmaAnalysisChannelAsReasoning() {
+        var filter = ReasoningOutputFilter()
+
+        #expect(filter.append("<|channel|>analysisThinking") == ReasoningOutputFilter.Chunk(reasoning: "Thinking"))
+        #expect(filter.append("<|channel|>answerVisible") == ReasoningOutputFilter.Chunk(visible: "Visible"))
+        #expect(filter.finish() == ReasoningOutputFilter.Chunk())
+    }
+
+    @Test
     func managedDownloaderDoesNotClampProgressToSmallerDelegateExpectedBytes() {
         let estimate = ManagedModelDownloadService.fileProgressEstimate(
             totalBytesWritten: 3_000,

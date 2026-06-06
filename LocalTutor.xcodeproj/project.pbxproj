@@ -12,6 +12,8 @@
 		6C5D8678F853DD78D6AA981E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
 		70BCCC648E62165587D1465F /* HuggingFace in Frameworks */ = {isa = PBXBuildFile; productRef = 1462228AFA92EF77605BE44D /* HuggingFace */; };
 		717A24CDB5BF14248879173C /* InferenceProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E030123AA43908C03B6E293 /* InferenceProfileTests.swift */; };
+		8A1B2C3D4E5F6A7B8C9D0E1F /* InlineLatexRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A1B2C3D4E5F6A7B8C9D0E2F /* InlineLatexRendererTests.swift */; };
+		9C7A94C1E43A4F1FAE9A3210 /* MarkdownParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C7A94C0E43A4F1FAE9A3210 /* MarkdownParserTests.swift */; };
 		A03066B0FB5FBBDBF0C923CF /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = F26D2627FCE126D846B704E9 /* MLXLLM */; };
 		B64FE2EE5C6B00CD8FC76275 /* BenchmarkRecordTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E297C2228A7488B9848689E /* BenchmarkRecordTests.swift */; };
 		CABA406B6BCA80B097963C0B /* LocalModelRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69A0AC9384D73E9C72DEA760 /* LocalModelRunnerTests.swift */; };
@@ -35,8 +37,10 @@
 /* Begin PBXFileReference section */
 		0E297C2228A7488B9848689E /* BenchmarkRecordTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BenchmarkRecordTests.swift; sourceTree = "<group>"; };
 		4E030123AA43908C03B6E293 /* InferenceProfileTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InferenceProfileTests.swift; sourceTree = "<group>"; };
+		8A1B2C3D4E5F6A7B8C9D0E2F /* InlineLatexRendererTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InlineLatexRendererTests.swift; sourceTree = "<group>"; };
 		69A0AC9384D73E9C72DEA760 /* LocalModelRunnerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LocalModelRunnerTests.swift; sourceTree = "<group>"; };
 		72375BAF9CA0C8D0980218C1 /* LocalTutorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LocalTutorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9C7A94C0E43A4F1FAE9A3210 /* MarkdownParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarkdownParserTests.swift; sourceTree = "<group>"; };
 		E18B94AB0EFC8197AE0BDFF7 /* MemoryPreflightTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryPreflightTests.swift; sourceTree = "<group>"; };
 		E74411EA2FC83B2900FB6366 /* LocalTutor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LocalTutor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F21C4FB1BA220000BA220000 /* SourceExtractorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SourceExtractorTests.swift; sourceTree = "<group>"; };
@@ -99,7 +103,9 @@
 			children = (
 				0E297C2228A7488B9848689E /* BenchmarkRecordTests.swift */,
 				4E030123AA43908C03B6E293 /* InferenceProfileTests.swift */,
+				8A1B2C3D4E5F6A7B8C9D0E2F /* InlineLatexRendererTests.swift */,
 				69A0AC9384D73E9C72DEA760 /* LocalModelRunnerTests.swift */,
+				9C7A94C0E43A4F1FAE9A3210 /* MarkdownParserTests.swift */,
 				E18B94AB0EFC8197AE0BDFF7 /* MemoryPreflightTests.swift */,
 				F21C4FB1BA220000BA220000 /* SourceExtractorTests.swift */,
 			);
@@ -223,7 +229,9 @@
 			files = (
 				B64FE2EE5C6B00CD8FC76275 /* BenchmarkRecordTests.swift in Sources */,
 				717A24CDB5BF14248879173C /* InferenceProfileTests.swift in Sources */,
+				8A1B2C3D4E5F6A7B8C9D0E1F /* InlineLatexRendererTests.swift in Sources */,
 				CABA406B6BCA80B097963C0B /* LocalModelRunnerTests.swift in Sources */,
+				9C7A94C1E43A4F1FAE9A3210 /* MarkdownParserTests.swift in Sources */,
 				679EB339C03BB5D60E5AB0C0 /* MemoryPreflightTests.swift in Sources */,
 				F21C4FB1BA110000BA110000 /* SourceExtractorTests.swift in Sources */,
 			);

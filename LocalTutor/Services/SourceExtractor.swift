@@ -16,23 +16,25 @@ import ZIPFoundation
 
 struct ExtractedSource: Sendable {
     var source: StudySource
-    var blocks: [DocumentBlock]
+    var blocks: [DocumentBlock] {
+        didSet {
+            cachedText = Self.combinedText(from: blocks)
+        }
+    }
     /// Nil on success, otherwise a short reason the contents could not be read.
     var failureReason: String?
     var warnings: [String] = []
     var omittedImageCount: Int = 0
+    private var cachedText: String
 
     /// Plain-text representation of the document's contents, kept for the
     /// existing context-window budget logic.
     var text: String {
-        blocks.compactMap(\.textValue)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
+        cachedText
     }
 
     var hasContent: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !cachedText.isEmpty
             || blocks.contains { $0.imageValue != nil }
     }
 
@@ -51,6 +53,28 @@ struct ExtractedSource: Sendable {
             warnings: warnings,
             omittedImageCount: 0
         )
+    }
+
+    init(
+        source: StudySource,
+        blocks: [DocumentBlock],
+        failureReason: String? = nil,
+        warnings: [String] = [],
+        omittedImageCount: Int = 0
+    ) {
+        self.source = source
+        self.blocks = blocks
+        self.failureReason = failureReason
+        self.warnings = warnings
+        self.omittedImageCount = omittedImageCount
+        self.cachedText = Self.combinedText(from: blocks)
+    }
+
+    private static func combinedText(from blocks: [DocumentBlock]) -> String {
+        blocks.compactMap(\.textValue)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
     }
 }
 
@@ -451,11 +475,12 @@ enum SourceExtractor {
     // MARK: - Plain and attributed text
 
     private static func readPlainText(_ url: URL) throws -> String {
-        if let text = try? String(contentsOf: url, encoding: .utf8) { return text }
-        if let text = try? String(contentsOf: url, encoding: .utf16) { return text }
-        if let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .isoLatin1) {
-            return text
+        guard let data = try? Data(contentsOf: url) else {
+            throw SourceExtractorError.unreadable("Could not decode the text file.")
         }
+        if let text = String(data: data, encoding: .utf8) { return text }
+        if let text = String(data: data, encoding: .utf16) { return text }
+        if let text = String(data: data, encoding: .isoLatin1) { return text }
         throw SourceExtractorError.unreadable("Could not decode the text file.")
     }
 
@@ -1030,10 +1055,9 @@ enum SourceExtractor {
             withAttributes: bodyAttributes
         )
 
-        let context = CIContext()
         let thumbs = images.prefix(4)
         for (offset, ciImage) in thumbs.enumerated() {
-            guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { continue }
+            guard let cgImage = syntheticImageContext.createCGImage(ciImage, from: ciImage.extent) else { continue }
             let nsImage = NSImage(cgImage: cgImage, size: ciImage.extent.size)
             let row = offset / 2
             let col = offset % 2
@@ -1044,6 +1068,8 @@ enum SourceExtractor {
         guard let tiff = image.tiffRepresentation else { return nil }
         return CIImage(data: tiff)
     }
+
+    private static let syntheticImageContext = CIContext()
 
     private static func clean(_ text: String) -> String {
         var stripped = text.replacingOccurrences(of: "\r\n", with: "\n")
@@ -1064,27 +1090,35 @@ enum SourceExtractor {
 /// blocks are deliberately not cached so CIImage-backed memory does not build up.
 actor SourceExtractionCache {
     static let shared = SourceExtractionCache()
+    private static let entryLimit = 20
 
     private struct Entry {
         var modified: Date?
         var extracted: ExtractedSource
+        var lastAccessed: Date
     }
 
     private var store: [String: Entry] = [:]
 
     func cached(for source: StudySource) -> ExtractedSource? {
-        guard let entry = store[key(for: source)] else { return nil }
+        let key = key(for: source)
+        guard var entry = store[key] else { return nil }
         if entry.modified != currentModificationDate(for: source) {
+            store[key] = nil
             return nil
         }
+        entry.lastAccessed = Date()
+        store[key] = entry
         return entry.extracted
     }
 
     func store(_ extracted: ExtractedSource, for source: StudySource) {
         store[key(for: source)] = Entry(
             modified: currentModificationDate(for: source),
-            extracted: extracted.textOnlyCacheCopy
+            extracted: extracted.textOnlyCacheCopy,
+            lastAccessed: Date()
         )
+        evictIfNeeded()
     }
 
     private func key(for source: StudySource) -> String {
@@ -1096,6 +1130,19 @@ actor SourceExtractionCache {
         let granted = url.startAccessingSecurityScopedResource()
         defer { if granted { url.stopAccessingSecurityScopedResource() } }
         return (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    // O(n log n) sort is fine here — entryLimit is 20.
+    private func evictIfNeeded() {
+        guard store.count > Self.entryLimit else { return }
+        let overflow = store.count - Self.entryLimit
+        let keys = store
+            .sorted { $0.value.lastAccessed < $1.value.lastAccessed }
+            .prefix(overflow)
+            .map(\.key)
+        for key in keys {
+            store[key] = nil
+        }
     }
 }
 

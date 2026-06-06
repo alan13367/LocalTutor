@@ -97,6 +97,7 @@ actor ManagedModelDownloadService {
     ]
     private static let minimumFreeSpaceMultiplier = 1.15
     private static let progressHeartbeatNanoseconds: UInt64 = 350_000_000
+    private static let expectedBytesRequestConcurrency = 6
 
     typealias ProgressHandler = @Sendable (DownloadProgressUpdate) -> Void
 
@@ -335,22 +336,50 @@ actor ManagedModelDownloadService {
         revision: String
     ) async -> [String: Int64?] {
         var result: [String: Int64?] = [:]
-        for filename in filenames {
-            result[filename] = await fetchExpectedBytes(
-                for: filename,
-                modelIdentifier: modelIdentifier,
-                revision: revision
-            )
+        var iterator = filenames.makeIterator()
+        let initialRequestCount = min(Self.expectedBytesRequestConcurrency, filenames.count)
+
+        await withTaskGroup(of: (String, Int64?).self) { group in
+            for _ in 0..<initialRequestCount {
+                guard let filename = iterator.next() else { break }
+                group.addTask { [metadataSession, hostURL] in
+                    let bytes = await Self.fetchExpectedBytes(
+                        for: filename,
+                        modelIdentifier: modelIdentifier,
+                        revision: revision,
+                        metadataSession: metadataSession,
+                        hostURL: hostURL
+                    )
+                    return (filename, bytes)
+                }
+            }
+
+            while let (filename, bytes) = await group.next() {
+                result[filename] = bytes
+                guard let nextFilename = iterator.next() else { continue }
+                group.addTask { [metadataSession, hostURL] in
+                    let bytes = await Self.fetchExpectedBytes(
+                        for: nextFilename,
+                        modelIdentifier: modelIdentifier,
+                        revision: revision,
+                        metadataSession: metadataSession,
+                        hostURL: hostURL
+                    )
+                    return (nextFilename, bytes)
+                }
+            }
         }
         return result
     }
 
-    private func fetchExpectedBytes(
+    private nonisolated static func fetchExpectedBytes(
         for relativePath: String,
         modelIdentifier: String,
-        revision: String
+        revision: String,
+        metadataSession: URLSession,
+        hostURL: URL
     ) async -> Int64? {
-        var request = URLRequest(url: remoteFileURL(for: modelIdentifier, revision: revision, relativePath: relativePath))
+        var request = URLRequest(url: remoteFileURL(for: modelIdentifier, revision: revision, relativePath: relativePath, hostURL: hostURL))
         request.httpMethod = "HEAD"
         request.timeoutInterval = 60
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -599,6 +628,20 @@ actor ManagedModelDownloadService {
     }
 
     private func remoteFileURL(for modelIdentifier: String, revision: String, relativePath: String) -> URL {
+        Self.remoteFileURL(
+            for: modelIdentifier,
+            revision: revision,
+            relativePath: relativePath,
+            hostURL: hostURL
+        )
+    }
+
+    private nonisolated static func remoteFileURL(
+        for modelIdentifier: String,
+        revision: String,
+        relativePath: String,
+        hostURL: URL
+    ) -> URL {
         hostURL
             .appending(path: modelIdentifier)
             .appending(path: "resolve")

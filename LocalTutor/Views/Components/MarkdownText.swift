@@ -84,10 +84,11 @@ private struct MarkdownBlockView: View {
                         Text("•")
                             .foregroundStyle(.secondary)
                             .font(.body)
-                        Text(item)
+                        Text(item.text)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                     }
+                    .padding(.leading, CGFloat(item.level) * 22)
                 }
             }
 
@@ -98,10 +99,11 @@ private struct MarkdownBlockView: View {
                         Text("\(idx + 1).")
                             .foregroundStyle(.secondary)
                             .font(.body.monospacedDigit())
-                        Text(item)
+                        Text(item.text)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                     }
+                    .padding(.leading, CGFloat(item.level) * 22)
                 }
             }
 
