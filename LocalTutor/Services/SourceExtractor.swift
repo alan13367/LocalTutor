@@ -94,13 +94,13 @@ enum SourceExtractor {
             )
 
             let extracted: ExtractedSource
-            if shouldUseCache(for: source),
+            if shouldUseCache(for: source, options: sourceOptions),
                let cached = await SourceExtractionCache.shared.cached(for: source) {
                 extracted = cached
             } else {
                 extracted = await extractOne(source, options: sourceOptions)
-                if shouldUseCache(for: source) {
-                    await SourceExtractionCache.shared.store(extracted, for: source)
+                if shouldUseCache(for: source, options: sourceOptions) {
+                    await SourceExtractionCache.shared.store(extracted.textOnlyCacheCopy, for: source)
                 }
             }
 
@@ -111,8 +111,11 @@ enum SourceExtractor {
         return results
     }
 
-    private static func shouldUseCache(for source: StudySource) -> Bool {
-        return true
+    private static func shouldUseCache(
+        for source: StudySource,
+        options: SourceExtractionOptions
+    ) -> Bool {
+        options.imageLimit == 0
     }
 
     private static func imagesDisabledWarning(for source: StudySource) -> String {

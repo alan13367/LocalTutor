@@ -15,12 +15,13 @@ struct SourceFingerprint: Codable, Equatable, Sendable {
 }
 
 struct SourceIndex: Codable, Equatable, Sendable {
-    static let schemaVersion = 3
+    static let schemaVersion = 5
 
     var sourceID: UUID
     var sourceName: String
     var sourceKind: StudySourceKind
     var fingerprint: SourceFingerprint
+    var parents: [SourceParentSection] = []
     var chunks: [SourceChunk]
     var warnings: [String]
 
@@ -29,6 +30,12 @@ struct SourceIndex: Codable, Equatable, Sendable {
         copy.sourceID = source.id
         copy.sourceName = source.displayName
         copy.sourceKind = source.kind
+        copy.parents = parents.map { parent in
+            var parent = parent
+            parent.sourceID = source.id
+            parent.sourceName = source.displayName
+            return parent
+        }
         copy.chunks = chunks.map { chunk in
             var chunk = chunk
             chunk.sourceID = source.id
@@ -39,16 +46,53 @@ struct SourceIndex: Codable, Equatable, Sendable {
     }
 }
 
+enum SourceElementKind: String, Codable, Equatable, Sendable {
+    case heading
+    case paragraph
+    case list
+    case table
+    case mixed
+}
+
+struct SourceLocatorRange: Codable, Equatable, Sendable {
+    var raw: String?
+    var startPage: Int?
+    var endPage: Int?
+
+    var displayValue: String? {
+        if let startPage, let endPage, startPage != endPage {
+            return "pages \(startPage)-\(endPage)"
+        }
+        if let startPage {
+            return "page \(startPage)"
+        }
+        return raw
+    }
+}
+
+struct SourceParentSection: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var sourceID: UUID
+    var sourceName: String
+    var locatorRange: SourceLocatorRange
+    var headingPath: [String]
+    var ordinal: Int
+    var text: String
+    var estimatedTokenCount: Int
+}
+
 struct SourceChunk: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var sourceID: UUID
     var sourceName: String
     var locator: String?
+    var locatorRange = SourceLocatorRange(raw: nil, startPage: nil, endPage: nil)
     var headingPath: [String]
+    var parentID: String? = nil
+    var elementKind: SourceElementKind = .paragraph
     var ordinal: Int
     var text: String
     var estimatedTokenCount: Int
-    var embedding: [Float]?
 
     var headingTitle: String? {
         headingPath.last
@@ -67,14 +111,17 @@ struct SourceChunk: Codable, Equatable, Identifiable, Sendable {
 }
 
 enum SourceIndexBuilder {
-    static let targetChunkTokens = 700
+    static let targetChunkTokens = 600
+    static let maximumChunkTokens = 800
+    static let overlapTokens = 90
+    static let parentExpansionLimit = 1_200
 
     static func build(from extracted: ExtractedSource) async -> SourceIndex {
         let units = extracted.blocks.compactMap { block -> SourceTextUnit? in
             guard case .text(let text) = block else { return nil }
             return SourceTextUnit.parse(text, sourceName: extracted.source.displayName)
         }
-        let chunks = await buildChunks(
+        let built = buildStructure(
             units: units,
             sourceID: extracted.source.id,
             sourceName: extracted.source.displayName
@@ -84,7 +131,8 @@ enum SourceIndexBuilder {
             sourceName: extracted.source.displayName,
             sourceKind: extracted.source.kind,
             fingerprint: SourceIndexStore.fingerprint(for: extracted.source),
-            chunks: chunks,
+            parents: built.parents,
+            chunks: built.chunks,
             warnings: extracted.warnings
         )
     }
@@ -94,57 +142,30 @@ enum SourceIndexBuilder {
         sourceID: UUID,
         sourceName: String
     ) async -> [SourceChunk] {
+        buildStructure(
+            units: units,
+            sourceID: sourceID,
+            sourceName: sourceName
+        ).chunks
+    }
+
+    private static func buildStructure(
+        units: [SourceTextUnit],
+        sourceID: UUID,
+        sourceName: String
+    ) -> (parents: [SourceParentSection], chunks: [SourceChunk]) {
         var headingStack: [SourceHeading] = []
-        var bufferText = ""
-        var locators: [String] = []
-        var ordinal = 0
+        var sections: [SectionDraft] = []
+        var current = SectionDraft(headingPath: [], lines: [], locators: [])
 
-        // In order to use await inside flush, we need to collect chunks asynchronously or await inline.
-        // Actually, to make the logic simple without changing the whole parser loop:
-        // We can just construct a temporary list of chunks, and then compute embeddings for them at the end.
-        // Or we can do it inside flush if flush is refactored, but it's a local function.
-        // Swift allows async closures but local functions can be async.
-        
-        // We'll collect chunk data first, then compute embeddings.
-        struct ChunkData {
-            var locator: String?
-            var headingPath: [String]
-            var ordinal: Int
-            var text: String
-            var estimatedTokenCount: Int
-        }
-        var pendingChunks: [ChunkData] = []
-        
-        func flush() {
-            let text = bufferText
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else {
-                bufferText.removeAll(keepingCapacity: true)
-                locators.removeAll()
-                return
-            }
-
-            ordinal += 1
-            pendingChunks.append(
-                ChunkData(
-                    locator: mergedLocator(locators),
-                    headingPath: headingStack.map(\.displayTitle),
-                    ordinal: ordinal,
-                    text: text,
-                    estimatedTokenCount: PromptTokenEstimator.estimate(text)
-                )
+        func flushSection() {
+            guard !current.lines.isEmpty else { return }
+            sections.append(current)
+            current = SectionDraft(
+                headingPath: headingStack.map(\.displayTitle),
+                lines: [],
+                locators: []
             )
-            bufferText.removeAll(keepingCapacity: true)
-            locators.removeAll()
-        }
-
-        func appendLine(_ line: String) {
-            if bufferText.isEmpty {
-                bufferText = line
-            } else {
-                bufferText.append("\n")
-                bufferText.append(line)
-            }
         }
 
         for unit in units {
@@ -154,86 +175,221 @@ enum SourceIndexBuilder {
 
             for line in lines {
                 guard !line.isEmpty else {
-                    if !bufferText.isEmpty {
-                        bufferText.append("\n")
+                    if !current.lines.isEmpty, current.lines.last != "" {
+                        current.lines.append("")
                     }
                     continue
                 }
 
                 if let heading = SourceHeading.parse(line) {
-                    flush()
+                    flushSection()
                     headingStack.removeAll { $0.level >= heading.level }
                     headingStack.append(heading)
-                    appendLine(line)
+                    current.headingPath = headingStack.map(\.displayTitle)
+                    current.lines.append(line)
                     if let locator = unit.locator {
-                        locators.append(locator)
+                        current.locators.append(locator)
                     }
                     continue
                 }
 
-                appendLine(line)
+                current.lines.append(line)
                 if let locator = unit.locator {
-                    locators.append(locator)
-                }
-
-                if PromptTokenEstimator.estimateNonEmptyTrimmedCharacterCount(bufferText.count) >= targetChunkTokens {
-                    flush()
+                    current.locators.append(locator)
                 }
             }
         }
 
-        flush()
-        
-        // Generate embeddings concurrently for all chunks
-        let embeddings = await withTaskGroup(of: (Int, [Float]?).self) { group in
-            for (index, pending) in pendingChunks.enumerated() {
-                group.addTask {
-                    let searchableText = pending.text + " " + pending.headingPath.joined(separator: " ")
-                    let embedding = try? await LocalEmbeddingRunner.shared.embed(text: searchableText)
-                    return (index, embedding)
-                }
-            }
+        flushSection()
+        var parents: [SourceParentSection] = []
+        var chunks: [SourceChunk] = []
 
-            var results = [Int: [Float]?]()
-            for await (index, embedding) in group {
-                results[index] = embedding
-            }
-            return results
-        }
-
-        var finalChunks: [SourceChunk] = []
-        finalChunks.reserveCapacity(pendingChunks.count)
-        for (index, pending) in pendingChunks.enumerated() {
-            finalChunks.append(
-                SourceChunk(
-                    id: "\(sourceID.uuidString)-\(pending.ordinal)",
+        for (sectionIndex, section) in sections.enumerated() {
+            let text = section.lines.joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            let locatorRange = makeLocatorRange(section.locators)
+            let parentID = stableID(
+                sourceID: sourceID,
+                namespace: "parent",
+                ordinal: sectionIndex,
+                text: text
+            )
+            parents.append(
+                SourceParentSection(
+                    id: parentID,
                     sourceID: sourceID,
                     sourceName: sourceName,
-                    locator: pending.locator,
-                    headingPath: pending.headingPath,
-                    ordinal: pending.ordinal,
-                    text: pending.text,
-                    estimatedTokenCount: pending.estimatedTokenCount,
-                    embedding: embeddings[index] ?? nil
+                    locatorRange: locatorRange,
+                    headingPath: section.headingPath,
+                    ordinal: sectionIndex + 1,
+                    text: text,
+                    estimatedTokenCount: PromptTokenEstimator.estimate(text)
                 )
             )
+
+            let pieces = recursivePieces(text)
+            let windows = packedWindows(pieces)
+            for window in windows {
+                let ordinal = chunks.count + 1
+                let chunkText = window.joined()
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                chunks.append(
+                    SourceChunk(
+                        id: stableID(
+                            sourceID: sourceID,
+                            namespace: parentID,
+                            ordinal: ordinal,
+                            text: chunkText
+                        ),
+                        sourceID: sourceID,
+                        sourceName: sourceName,
+                        locator: locatorRange.displayValue,
+                        locatorRange: locatorRange,
+                        headingPath: section.headingPath,
+                        parentID: parentID,
+                        elementKind: elementKind(for: chunkText),
+                        ordinal: ordinal,
+                        text: chunkText,
+                        estimatedTokenCount: PromptTokenEstimator.estimate(chunkText)
+                    )
+                )
+            }
         }
 
-        return finalChunks
+        return (parents, chunks)
     }
 
-    private static func mergedLocator(_ locators: [String]) -> String? {
+    private struct SectionDraft {
+        var headingPath: [String]
+        var lines: [String]
+        var locators: [String]
+    }
+
+    private static func makeLocatorRange(_ locators: [String]) -> SourceLocatorRange {
         let unique = Array(NSOrderedSet(array: locators)).compactMap { $0 as? String }
-        guard let first = unique.first else { return nil }
-        if unique.count == 1 {
-            return first
+        let pages = unique.compactMap(pageNumber(in:))
+        return SourceLocatorRange(
+            raw: unique.isEmpty ? nil : unique.joined(separator: " - "),
+            startPage: pages.first,
+            endPage: pages.last
+        )
+    }
+
+    private static func recursivePieces(_ text: String) -> [String] {
+        split(text, separators: ["\n\n", "\n", ". ", " "])
+    }
+
+    private static func split(_ text: String, separators: [String]) -> [String] {
+        guard PromptTokenEstimator.estimate(text) > maximumChunkTokens,
+              let separator = separators.first else {
+            return [text]
         }
-        if let firstPage = pageNumber(in: first),
-           let lastPage = unique.compactMap(pageNumber(in:)).last,
-           firstPage != lastPage {
-            return "pages \(firstPage)-\(lastPage)"
+        let pieces = splitPreservingSeparator(text, separator: separator)
+        guard pieces.count > 1 else {
+            let characterLimit = PromptTokenEstimator.characterLimit(forTokenBudget: maximumChunkTokens)
+            return stride(from: 0, to: text.count, by: characterLimit).map { offset in
+                let start = text.index(text.startIndex, offsetBy: offset)
+                let end = text.index(start, offsetBy: min(characterLimit, text.distance(from: start, to: text.endIndex)))
+                return String(text[start..<end])
+            }
         }
-        return "\(first) - \(unique.last ?? first)"
+        return pieces.flatMap { split($0, separators: Array(separators.dropFirst())) }
+    }
+
+    private static func splitPreservingSeparator(_ text: String, separator: String) -> [String] {
+        guard !separator.isEmpty else { return [text] }
+        var pieces: [String] = []
+        var start = text.startIndex
+
+        while start < text.endIndex {
+            if let range = text.range(of: separator, range: start..<text.endIndex) {
+                let piece = String(text[start..<range.upperBound])
+                if !piece.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    pieces.append(piece)
+                }
+                start = range.upperBound
+            } else {
+                let piece = String(text[start..<text.endIndex])
+                if !piece.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    pieces.append(piece)
+                }
+                break
+            }
+        }
+        return pieces
+    }
+
+    private static func packedWindows(_ pieces: [String]) -> [[String]] {
+        var windows: [[String]] = []
+        var current: [String] = []
+        var tokens = 0
+
+        for piece in pieces {
+            let pieceTokens = PromptTokenEstimator.estimate(piece)
+            if !current.isEmpty, tokens + pieceTokens > targetChunkTokens {
+                windows.append(current)
+                current = overlapSuffix(from: current)
+                tokens = current.reduce(0) { $0 + PromptTokenEstimator.estimate($1) }
+                if tokens + pieceTokens > maximumChunkTokens {
+                    current.removeAll(keepingCapacity: true)
+                    tokens = 0
+                }
+            }
+            if pieceTokens > maximumChunkTokens {
+                if !current.isEmpty {
+                    windows.append(current)
+                    current = []
+                    tokens = 0
+                }
+                windows.append([piece])
+            } else {
+                current.append(piece)
+                tokens += pieceTokens
+            }
+        }
+        if !current.isEmpty {
+            windows.append(current)
+        }
+        return windows
+    }
+
+    private static func overlapSuffix(from pieces: [String]) -> [String] {
+        var result: [String] = []
+        var tokens = 0
+        for piece in pieces.reversed() {
+            let count = PromptTokenEstimator.estimate(piece)
+            guard tokens + count <= overlapTokens || result.isEmpty else { break }
+            result.insert(piece, at: 0)
+            tokens += count
+        }
+        return result
+    }
+
+    private static func elementKind(for text: String) -> SourceElementKind {
+        let lines = text.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        if lines.allSatisfy({ $0.hasPrefix("- ") || $0.hasPrefix("* ") || $0.range(of: #"^\d+\.\s"#, options: .regularExpression) != nil }) {
+            return .list
+        }
+        if lines.count > 1, lines.allSatisfy({ $0.contains("|") || $0.contains("\t") || $0.contains(",") }) {
+            return .table
+        }
+        if lines.first.map({ SourceHeading.parse($0) != nil }) == true, lines.count == 1 {
+            return .heading
+        }
+        return lines.first.map({ SourceHeading.parse($0) != nil }) == true ? .mixed : .paragraph
+    }
+
+    private static func stableID(
+        sourceID: UUID,
+        namespace: String,
+        ordinal: Int,
+        text: String
+    ) -> String {
+        let value = "\(sourceID.uuidString)|\(namespace)|\(ordinal)|\(text)"
+        return SHA256.hash(data: Data(value.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private static func pageNumber(in locator: String) -> Int? {
@@ -360,44 +516,18 @@ enum PromptTokenEstimator {
 actor SourceIndexStore {
     static let shared = SourceIndexStore()
 
-    private let fileManager: FileManager
-    private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
+    private let repository: any SourceIndexRepository
 
-    init(fileManager: FileManager = .default) {
-        self.fileManager = fileManager
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "NaN")
-        self.encoder = encoder
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "NaN")
-        self.decoder = decoder
+    init(repository: any SourceIndexRepository = SQLiteSourceIndexRepository.shared) {
+        self.repository = repository
     }
 
-    func cachedIndex(for source: StudySource) -> SourceIndex? {
-        let fingerprint = Self.fingerprint(for: source)
-        let url = cacheURL(for: fingerprint)
-        guard fileManager.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url),
-              let index = try? decoder.decode(SourceIndex.self, from: data),
-              index.fingerprint == fingerprint else {
-            return nil
-        }
-        return index
+    func cachedIndex(for source: StudySource) async -> SourceIndex? {
+        await repository.cachedIndex(for: source)
     }
 
-    func store(_ index: SourceIndex) {
-        let url = cacheURL(for: index.fingerprint)
-        do {
-            let data = try encoder.encode(index)
-            try data.write(to: url, options: [.atomic])
-        } catch {
-            // Source indexes are disposable caches; failed writes should not
-            // interrupt the study flow.
-        }
+    func store(_ index: SourceIndex) async {
+        try? await repository.store(index, state: .lexicalOnly)
     }
 
     static func fingerprint(for source: StudySource) -> SourceFingerprint {
@@ -414,18 +544,7 @@ actor SourceIndexStore {
         )
     }
 
-    private func cacheURL(for fingerprint: SourceFingerprint) -> URL {
-        let directory = (try? AppDirectories.sourceIndexes(fileManager: fileManager))
-            ?? fileManager.temporaryDirectory
-        return directory.appendingPathComponent(cacheKey(for: fingerprint)).appendingPathExtension("json")
-    }
-
-    private func cacheKey(for fingerprint: SourceFingerprint) -> String {
-        let raw = "\(fingerprint.schemaVersion)|\(fingerprint.url)|\(fingerprint.bookmarkID ?? "")|\(fingerprint.fileSize ?? -1)|\(fingerprint.modifiedAt?.timeIntervalSince1970 ?? 0)"
-        return Self.digestHex(Data(raw.utf8))
-    }
-
-    private static func digestHex(_ data: Data) -> String {
+    static func digestHex(_ data: Data) -> String {
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
     }

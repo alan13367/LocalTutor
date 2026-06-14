@@ -98,7 +98,7 @@ enum ModelCatalog {
         tier: .eightGB,
         minimumSystemMemoryBytes: 4.gibibytes,
         defaults: ModelRuntimeDefaults.text,
-        configuration: .llm(
+        configuration: .embedder(
             ModelConfiguration(
                 id: "mlx-community/embeddinggemma-300m-4bit"
             )

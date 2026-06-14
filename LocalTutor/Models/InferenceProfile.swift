@@ -87,6 +87,7 @@ typealias GenerationDefaults = ModelRuntimeDefaults
 enum ProfileModelConfiguration: Sendable {
     case llm(ModelConfiguration)
     case vlm(ModelConfiguration)
+    case embedder(ModelConfiguration)
 }
 
 struct ModelProfile: Identifiable, Sendable {

@@ -187,6 +187,7 @@ enum SourceContextPlanner {
             let cached = await SourceIndexStore.shared.cachedIndex(for: source)
             if let cached {
                 indexes.append(cached.rebased(to: source))
+                await SourceIndexCoordinator.shared.scheduleSemanticIndex(cached) { _ in }
             }
 
             let needsExtraction = cached == nil || remainingImages > 0 || source.isImage
@@ -198,9 +199,12 @@ enum SourceContextPlanner {
             remainingImages = max(0, remainingImages - extracted.includedImageCount)
 
             if cached == nil {
+                await status("Chunking source \(index + 1) of \(sources.count)")
                 let index = await SourceIndexBuilder.build(from: extracted)
                 indexes.append(index)
-                await SourceIndexStore.shared.store(index)
+                await SourceIndexCoordinator.shared.cacheIndex(index)
+                await status("Using lexical search while semantic search is prepared")
+                await SourceIndexCoordinator.shared.scheduleSemanticIndex(index) { _ in }
             }
             if extracted.includedImageCount > 0 || !extracted.warnings.isEmpty || extracted.omittedImageCount > 0 {
                 visualExtracted.append(extracted)
@@ -338,7 +342,8 @@ enum SourceContextPlanner {
                 chunks: distilled,
                 visualExtracted: visualExtracted,
                 omittedTextChunkCount: 0,
-                supportsVision: profile.supportsVision
+                supportsVision: profile.supportsVision,
+                extraWarnings: retrieval.warnings
             )
         }
 
@@ -348,7 +353,8 @@ enum SourceContextPlanner {
             chunks: packed.chunks,
             visualExtracted: visualExtracted,
             omittedTextChunkCount: packed.omitted,
-            supportsVision: profile.supportsVision
+            supportsVision: profile.supportsVision,
+            extraWarnings: retrieval.warnings
         )
     }
 

@@ -351,6 +351,8 @@ actor LocalModelRunner: InferenceService {
                 using: tokenizerLoader,
                 configuration: localConfiguration
             )
+        case .embedder:
+            throw LocalModelRunnerError.unsupportedProfile(profile.id)
         }
 
         activeContainer = container

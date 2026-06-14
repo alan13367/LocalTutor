@@ -7,7 +7,18 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var viewModel: StudyWorkspaceViewModel
+    @ObservedObject private var sourceIndexStatus = SourceIndexStatusModel.shared
     @Environment(\.dismiss) private var dismiss
+    @State private var indexStatistics = SourceIndexStatistics(
+        documentCount: 0,
+        chunkCount: 0,
+        vectorCount: 0,
+        diskBytes: 0
+    )
+    @State private var embeddingProgress: Double?
+    @State private var embeddingStatus = "Installed automatically when semantic search is first needed."
+    @State private var isPreparingEmbedding = false
+    @State private var isClearingIndex = false
 
     private var systemMemory: UInt64 {
         SystemMemory.totalBytes()
@@ -21,6 +32,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     machineCard
                     modelsSection
+                    indexingSection
                     aboutSection
                 }
                 .padding(24)
@@ -32,6 +44,7 @@ struct SettingsView: View {
         .frame(minWidth: 720, idealWidth: 820, minHeight: 560, idealHeight: 700)
         .onAppear {
             viewModel.refreshModelCacheInfo()
+            refreshIndexStatistics()
         }
     }
 
@@ -164,6 +177,140 @@ struct SettingsView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
             )
+        }
+    }
+
+    private var indexingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Document Indexing")
+                .font(.title3.weight(.semibold))
+            Text("Attached sources use local full-text and semantic search. Documents never leave this Mac.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 12) {
+                    Image(systemName: "text.magnifyingglass")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 30)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Embedding Gemma 300M")
+                            .font(.headline)
+                        Text(embeddingStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if viewModel.cacheInfo(for: ModelCatalog.embeddingGemma300M).isCached {
+                        Button("Remove") {
+                            viewModel.removeCachedModel(ModelCatalog.embeddingGemma300M)
+                        }
+                        .disabled(!viewModel.canRemoveCachedModel(ModelCatalog.embeddingGemma300M))
+                    } else {
+                        Button("Install") {
+                            prepareEmbeddingModel()
+                        }
+                        .disabled(isPreparingEmbedding)
+                    }
+                }
+
+                if let embeddingProgress {
+                    ProgressView(value: embeddingProgress)
+                }
+
+                Divider()
+
+                if let progress = sourceIndexStatus.latest {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(progress.message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let fraction = progress.fraction,
+                           progress.phase == .downloading || progress.phase == .embedding {
+                            ProgressView(value: fraction)
+                        }
+                    }
+                }
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Source index")
+                            .font(.headline)
+                        Text(
+                            "\(indexStatistics.documentCount) documents · \(indexStatistics.chunkCount) chunks · \(indexStatistics.vectorCount) vectors · \(ByteCountFormatter.localTutorMemoryString(fromByteCount: indexStatistics.diskBytes))"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Clear Index", role: .destructive) {
+                        clearIndex()
+                    }
+                    .disabled(isClearingIndex || indexStatistics.documentCount == 0)
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.thinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+            )
+        }
+    }
+
+    private func prepareEmbeddingModel() {
+        isPreparingEmbedding = true
+        embeddingStatus = "Preparing semantic search"
+        Task {
+            do {
+                try await LocalEmbeddingRunner.shared.prepare { event in
+                    await MainActor.run {
+                        switch event {
+                        case .downloading(let update):
+                            embeddingProgress = update.fraction
+                            embeddingStatus = "Downloading semantic search model"
+                        case .ready:
+                            embeddingProgress = 1
+                            embeddingStatus = "Ready for semantic search"
+                        }
+                    }
+                }
+                await MainActor.run {
+                    isPreparingEmbedding = false
+                    viewModel.refreshModelCacheInfo(force: true)
+                }
+            } catch {
+                await MainActor.run {
+                    isPreparingEmbedding = false
+                    embeddingProgress = nil
+                    embeddingStatus = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func refreshIndexStatistics() {
+        Task {
+            let statistics = await SourceIndexCoordinator.shared.statistics()
+            await MainActor.run {
+                indexStatistics = statistics
+            }
+        }
+    }
+
+    private func clearIndex() {
+        isClearingIndex = true
+        Task {
+            try? await SourceIndexCoordinator.shared.clear()
+            let statistics = await SourceIndexCoordinator.shared.statistics()
+            await MainActor.run {
+                indexStatistics = statistics
+                isClearingIndex = false
+            }
         }
     }
 }

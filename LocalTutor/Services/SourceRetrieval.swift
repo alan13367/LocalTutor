@@ -3,6 +3,7 @@
 //  LocalTutor
 //
 
+import Accelerate
 import Foundation
 
 struct SourcePromptContext: Sendable {
@@ -18,10 +19,19 @@ struct SourcePromptContext: Sendable {
 struct SourceRetrievalResult: Sendable {
     var chunks: [SourceChunk]
     var matchedHeading: String?
+    var mode: RetrievalMode = .lexical
+    var warnings: [String] = []
+    var selectedChunkIDs: [String] = []
+}
+
+enum RetrievalMode: String, Sendable {
+    case lexical
+    case hybrid
 }
 
 enum SourceRetriever {
     private static let tokenCache = SourceTokenCache()
+    private static let repository: any SourceIndexRepository = SQLiteSourceIndexRepository.shared
 
     static func retrieve(query: String, indexes: [SourceIndex]) async -> SourceRetrievalResult {
         let allChunks = indexes.flatMap(\.chunks)
@@ -30,57 +40,197 @@ enum SourceRetriever {
             let headingMatches = allChunks.filter { $0.headingPath.contains(matchedHeading) }
             return SourceRetrievalResult(
                 chunks: headingMatches.sorted(by: sourceOrder),
-                matchedHeading: matchedHeading
+                matchedHeading: matchedHeading,
+                selectedChunkIDs: headingMatches.map(\.id)
             )
         }
 
-        let bm25Scored = bm25(queryTerms: queryTerms, chunks: allChunks)
-        let maxBM25 = bm25Scored.map(\.score).max() ?? 1.0
-        let bm25Scale = maxBM25 > 0 ? maxBM25 : 1.0
-        
-        let queryEmbedding = try? await LocalEmbeddingRunner.shared.embed(text: query)
-        
-        let scored = bm25Scored.map { item -> (chunk: SourceChunk, score: Double) in
-            var similarity: Double = 0.0
-            if let qEmb = queryEmbedding, let cEmb = item.chunk.embedding {
-                similarity = cosineSimilarity(qEmb, cEmb)
-            }
-            let normalizedBM25 = item.score / bm25Scale
-            
-            // If embeddings are available, use a weighted combination
-            // Otherwise fallback to BM25
-            let combined = queryEmbedding != nil ? ((normalizedBM25 * 0.3) + (max(0, similarity) * 0.7)) : normalizedBM25
-            return (item.chunk, combined)
+        let lexical: [SourceChunk]
+        var warnings: [String] = []
+        do {
+            let persisted = try await repository.lexicalSearch(
+                query: query,
+                fingerprints: indexes.map(\.fingerprint),
+                limit: 40
+            )
+            let currentByID = Dictionary(uniqueKeysWithValues: allChunks.map { ($0.id, $0) })
+            let current = persisted.compactMap { currentByID[$0.id] }
+            lexical = current.isEmpty
+                ? bm25(queryTerms: queryTerms, chunks: allChunks)
+                    .filter { $0.score > 0 }
+                    .sorted { $0.score > $1.score }
+                    .prefix(40)
+                    .map(\.chunk)
+                : current
+        } catch {
+            lexical = bm25(queryTerms: queryTerms, chunks: allChunks)
+                .filter { $0.score > 0 }
+                .sorted { $0.score > $1.score }
+                .prefix(40)
+                .map(\.chunk)
+            warnings.append("The persistent lexical index was unavailable; LocalTutor used its in-memory index.")
         }
 
-        let chunks = scored
-            .filter { $0.score > 0 }
-            .sorted { lhs, rhs in
-                if lhs.score == rhs.score {
-                    return sourceOrder(lhs.chunk, rhs.chunk)
+        var dense: [SourceChunk] = []
+        do {
+            let entries = try await repository.vectorEntries(fingerprints: indexes.map(\.fingerprint))
+            let currentIDs = Set(allChunks.map(\.id))
+            let currentEntries = entries.filter { currentIDs.contains($0.chunk.id) }
+            if !currentEntries.isEmpty {
+                let queryVector = try await SourceIndexCoordinator.shared.embedQuery(query)
+                let scores = exactScores(query: queryVector, entries: currentEntries)
+                dense = zip(currentEntries, scores).map { entry, score in
+                    (chunk: entry.chunk, score: score)
                 }
-                return lhs.score > rhs.score
+                .sorted { $0.score > $1.score }
+                .prefix(40)
+                .map(\.chunk)
             }
-            .map(\.chunk)
+        } catch {
+            warnings.append("Semantic search was unavailable for this request.")
+        }
 
-        return SourceRetrievalResult(chunks: chunks.isEmpty ? allChunks.sorted(by: sourceOrder) : chunks, matchedHeading: nil)
+        let fused = reciprocalRankFusion(lexical: lexical, dense: dense)
+        let selected = Array(fused.prefix(12))
+        let expanded = expand(selected, indexes: indexes)
+        let fallback = lexical.isEmpty ? allChunks.sorted(by: sourceOrder) : lexical
+        return SourceRetrievalResult(
+            chunks: expanded.isEmpty ? fallback : expanded,
+            matchedHeading: nil,
+            mode: dense.isEmpty ? .lexical : .hybrid,
+            warnings: warnings,
+            selectedChunkIDs: selected.map(\.id)
+        )
     }
 
-    private static func cosineSimilarity(_ lhs: [Float], _ rhs: [Float]) -> Double {
-        guard lhs.count == rhs.count, !lhs.isEmpty else { return 0 }
-        var dotProduct: Float = 0
-        var normLhs: Float = 0
-        var normRhs: Float = 0
-        
-        // Simple manual computation to avoid Accelerate dependency issues if any
-        for i in 0..<lhs.count {
-            dotProduct += lhs[i] * rhs[i]
-            normLhs += lhs[i] * lhs[i]
-            normRhs += rhs[i] * rhs[i]
+    static func exactScores(
+        query: [Float],
+        entries: [SourceVectorEntry]
+    ) -> [Float] {
+        guard !query.isEmpty,
+              entries.allSatisfy({ $0.vector.count == query.count }) else {
+            return Array(repeating: -.infinity, count: entries.count)
         }
-        
-        guard normLhs > 0, normRhs > 0 else { return 0 }
-        return Double(dotProduct / (sqrt(normLhs) * sqrt(normRhs)))
+        let matrix = entries.flatMap(\.vector)
+        var scores = Array(repeating: Float(0), count: entries.count)
+        vDSP_mmul(
+            matrix,
+            1,
+            query,
+            1,
+            &scores,
+            1,
+            vDSP_Length(entries.count),
+            1,
+            vDSP_Length(query.count)
+        )
+        return scores
+    }
+
+    static func reciprocalRankFusion(
+        lexical: [SourceChunk],
+        dense: [SourceChunk]
+    ) -> [SourceChunk] {
+        var chunks: [String: SourceChunk] = [:]
+        var scores: [String: Double] = [:]
+        for (rank, chunk) in lexical.enumerated() {
+            chunks[chunk.id] = chunk
+            scores[chunk.id, default: 0] += 1 / Double(60 + rank + 1)
+        }
+        for (rank, chunk) in dense.enumerated() {
+            chunks[chunk.id] = chunk
+            scores[chunk.id, default: 0] += 1 / Double(60 + rank + 1)
+        }
+        return scores.sorted {
+            if $0.value == $1.value {
+                guard let lhs = chunks[$0.key], let rhs = chunks[$1.key] else { return $0.key < $1.key }
+                return sourceOrder(lhs, rhs)
+            }
+            return $0.value > $1.value
+        }
+        .compactMap { chunks[$0.key] }
+    }
+
+    private static func expand(_ selected: [SourceChunk], indexes: [SourceIndex]) -> [SourceChunk] {
+        let allChunks = indexes.flatMap(\.chunks)
+        let parents = Dictionary(uniqueKeysWithValues: indexes.flatMap(\.parents).map { ($0.id, $0) })
+        var expanded: [SourceChunk] = []
+        var seen: Set<String> = []
+
+        for chunk in selected {
+            if let parentID = chunk.parentID,
+               let parent = parents[parentID],
+               parent.estimatedTokenCount <= SourceIndexBuilder.parentExpansionLimit {
+                let parentChunk = SourceChunk(
+                    id: "parent-\(parent.id)",
+                    sourceID: parent.sourceID,
+                    sourceName: parent.sourceName,
+                    locator: parent.locatorRange.displayValue,
+                    locatorRange: parent.locatorRange,
+                    headingPath: parent.headingPath,
+                    parentID: parent.id,
+                    elementKind: .mixed,
+                    ordinal: chunk.ordinal,
+                    text: parent.text,
+                    estimatedTokenCount: parent.estimatedTokenCount
+                )
+                if seen.insert(parentChunk.id).inserted {
+                    expanded.append(parentChunk)
+                }
+                continue
+            }
+
+            let siblings = allChunks
+                .filter { $0.sourceID == chunk.sourceID && $0.parentID == chunk.parentID }
+                .sorted { $0.ordinal < $1.ordinal }
+            guard let index = siblings.firstIndex(where: { $0.id == chunk.id }) else {
+                if seen.insert(chunk.id).inserted { expanded.append(chunk) }
+                continue
+            }
+            let lower = max(0, index - 1)
+            let upper = min(siblings.count - 1, index + 1)
+            for sibling in siblings[lower...upper] where seen.insert(sibling.id).inserted {
+                expanded.append(sibling)
+            }
+        }
+        return mergeContiguous(expanded)
+    }
+
+    private static func mergeContiguous(_ chunks: [SourceChunk]) -> [SourceChunk] {
+        var result: [SourceChunk] = []
+        for chunk in chunks {
+            guard var previous = result.last,
+                  previous.sourceID == chunk.sourceID,
+                  previous.parentID == chunk.parentID,
+                  chunk.ordinal == previous.ordinal + 1 else {
+                result.append(chunk)
+                continue
+            }
+            result.removeLast()
+            let addition = removingOverlap(prefix: previous.text, suffix: chunk.text)
+            previous.text += addition.isEmpty ? "" : "\n\n\(addition)"
+            previous.estimatedTokenCount = PromptTokenEstimator.estimate(previous.text)
+            previous.locatorRange.endPage = chunk.locatorRange.endPage ?? previous.locatorRange.endPage
+            previous.locator = previous.locatorRange.displayValue
+            result.append(previous)
+        }
+        return result
+    }
+
+    private static func removingOverlap(prefix: String, suffix: String) -> String {
+        let prefixWords = prefix.split(whereSeparator: \.isWhitespace)
+        let suffixWords = suffix.split(whereSeparator: \.isWhitespace)
+        let maximum = min(overlapLimit(prefixWords.count), suffixWords.count)
+        for count in stride(from: maximum, through: 1, by: -1) {
+            if prefixWords.suffix(count).elementsEqual(suffixWords.prefix(count)) {
+                return suffixWords.dropFirst(count).joined(separator: " ")
+            }
+        }
+        return suffix
+    }
+
+    private static func overlapLimit(_ count: Int) -> Int {
+        min(count, SourceIndexBuilder.overlapTokens * PromptTokenEstimator.charactersPerToken)
     }
 
     static func tokenize(_ text: String) -> [String] {

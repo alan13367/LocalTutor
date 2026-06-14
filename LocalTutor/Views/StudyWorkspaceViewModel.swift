@@ -104,6 +104,10 @@ final class StudyWorkspaceViewModel: ObservableObject {
         currentSessionID = loaded[0].id
         hasLoaded = true
         refreshModelCacheInfo(force: true)
+        let restoredSources = loaded.flatMap(\.sources).reduce(into: [String: StudySource]()) {
+            $0[$1.accessibleURL.absoluteString] = $1
+        }
+        queueLexicalIndexing(Array(restoredSources.values))
     }
 
     // MARK: - Current session access
@@ -242,7 +246,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
         }
 
         modelCacheRefreshTask?.cancel()
-        let profiles = ModelProfile.studyCatalog
+        let profiles = ModelProfile.studyCatalog + [ModelCatalog.embeddingGemma300M]
         let cacheInfoProvider = cacheInfoProvider
         modelCacheRefreshTask = Task { [weak self] in
             let cacheInfo = await cacheInfoProvider(profiles)
@@ -310,6 +314,9 @@ final class StudyWorkspaceViewModel: ObservableObject {
                     _ = await preloadTaskToCancel.result
                 }
                 await inferenceService.unload()
+                if case .embedder = profile.configuration {
+                    await LocalEmbeddingRunner.shared.unload()
+                }
                 let result = try await cachedModelRemover(profile)
                 await MainActor.run {
                     self?.completeCachedModelRemoval(profile, result: result)
@@ -584,6 +591,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
 
         if !newSources.isEmpty {
             sources.append(contentsOf: newSources)
+            queueLexicalIndexing(newSources)
         }
 
         if !rejectedImages.isEmpty {
@@ -633,6 +641,26 @@ final class StudyWorkspaceViewModel: ObservableObject {
     func clearSources() {
         sources.removeAll()
         globalError = nil
+    }
+
+    private func queueLexicalIndexing(_ sources: [StudySource]) {
+        guard !ProcessInfo.processInfo.isRunningLocalTutorTests else { return }
+        let textSources = sources.filter { !$0.isImage }
+        guard !textSources.isEmpty else { return }
+        Task(priority: .utility) {
+            for source in textSources {
+                if await SourceIndexStore.shared.cachedIndex(for: source) != nil {
+                    continue
+                }
+                let extracted = await SourceExtractor.extract(
+                    [source],
+                    options: .defaults(for: .text)
+                ).first
+                guard let extracted, extracted.hasContent else { continue }
+                let index = await SourceIndexBuilder.build(from: extracted)
+                await SourceIndexCoordinator.shared.cacheIndex(index)
+            }
+        }
     }
 
     // MARK: - Turn lifecycle
@@ -730,6 +758,12 @@ final class StudyWorkspaceViewModel: ObservableObject {
 
         runTask = Task { [weak self] in
             guard let self else { return }
+            await SourceIndexCoordinator.shared.setTutorGenerationActive(true)
+            defer {
+                Task {
+                    await SourceIndexCoordinator.shared.setTutorGenerationActive(false)
+                }
+            }
             let temperature: Float? = user.resourceKind.isInteractive ? 0.1 : nil
 
             do {
