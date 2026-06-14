@@ -217,8 +217,12 @@ final class StudyWorkspaceViewModel: ObservableObject {
         selectedProfile ?? ModelProfile.recommendedDefault
     }
 
+    var supportsVision: Bool {
+        ModelRuntimePolicyProvider.policy(for: activeProfile).supportsVision
+    }
+
     var supportedSourceContentTypes: [UTType] {
-        StudySource.supportedContentTypes(supportsVision: selectedProfile?.supportsVision ?? true)
+        StudySource.supportedContentTypes(supportsVision: supportsVision)
     }
 
     func setActiveProfile(_ profile: ModelProfile) {
@@ -511,7 +515,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
     }
 
     var selectedImageURL: URL? {
-        guard selectedProfile?.supportsVision == true else { return nil }
+        guard supportsVision else { return nil }
         return sources.first(where: \.isImage)?.accessibleURL
     }
 
@@ -538,7 +542,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
     }
 
     private var usableSourcesForActiveProfile: [StudySource] {
-        selectedProfile?.supportsVision == false ? sources.filter { !$0.isImage } : sources
+        !supportsVision ? sources.filter { !$0.isImage } : sources
     }
 
     var shouldShowFirstTurnSourcePreview: Bool {
@@ -567,7 +571,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
     // MARK: - Source management
 
     func importURLs(_ urls: [URL]) {
-        importURLs(urls, supportsVision: selectedProfile?.supportsVision ?? true)
+        importURLs(urls, supportsVision: supportsVision)
     }
 
     func importURLs(_ urls: [URL], supportsVision: Bool) {

@@ -23,7 +23,7 @@ struct SourceRetrievalResult: Sendable {
 enum SourceRetriever {
     private static let tokenCache = SourceTokenCache()
 
-    static func retrieve(query: String, indexes: [SourceIndex]) -> SourceRetrievalResult {
+    static func retrieve(query: String, indexes: [SourceIndex]) async -> SourceRetrievalResult {
         let allChunks = indexes.flatMap(\.chunks)
         let queryTerms = tokenize(query)
         if let matchedHeading = bestHeadingMatch(query: query, queryTerms: queryTerms, chunks: allChunks) {
@@ -34,7 +34,25 @@ enum SourceRetriever {
             )
         }
 
-        let scored = bm25(queryTerms: queryTerms, chunks: allChunks)
+        let bm25Scored = bm25(queryTerms: queryTerms, chunks: allChunks)
+        let maxBM25 = bm25Scored.map(\.score).max() ?? 1.0
+        let bm25Scale = maxBM25 > 0 ? maxBM25 : 1.0
+        
+        let queryEmbedding = try? await LocalEmbeddingRunner.shared.embed(text: query)
+        
+        let scored = bm25Scored.map { item -> (chunk: SourceChunk, score: Double) in
+            var similarity: Double = 0.0
+            if let qEmb = queryEmbedding, let cEmb = item.chunk.embedding {
+                similarity = cosineSimilarity(qEmb, cEmb)
+            }
+            let normalizedBM25 = item.score / bm25Scale
+            
+            // If embeddings are available, use a weighted combination
+            // Otherwise fallback to BM25
+            let combined = queryEmbedding != nil ? ((normalizedBM25 * 0.3) + (max(0, similarity) * 0.7)) : normalizedBM25
+            return (item.chunk, combined)
+        }
+
         let chunks = scored
             .filter { $0.score > 0 }
             .sorted { lhs, rhs in
@@ -46,6 +64,23 @@ enum SourceRetriever {
             .map(\.chunk)
 
         return SourceRetrievalResult(chunks: chunks.isEmpty ? allChunks.sorted(by: sourceOrder) : chunks, matchedHeading: nil)
+    }
+
+    private static func cosineSimilarity(_ lhs: [Float], _ rhs: [Float]) -> Double {
+        guard lhs.count == rhs.count, !lhs.isEmpty else { return 0 }
+        var dotProduct: Float = 0
+        var normLhs: Float = 0
+        var normRhs: Float = 0
+        
+        // Simple manual computation to avoid Accelerate dependency issues if any
+        for i in 0..<lhs.count {
+            dotProduct += lhs[i] * rhs[i]
+            normLhs += lhs[i] * lhs[i]
+            normRhs += rhs[i] * rhs[i]
+        }
+        
+        guard normLhs > 0, normRhs > 0 else { return 0 }
+        return Double(dotProduct / (sqrt(normLhs) * sqrt(normRhs)))
     }
 
     static func tokenize(_ text: String) -> [String] {

@@ -30,18 +30,6 @@ struct SettingsView: View {
             .background(Color(nsColor: .windowBackgroundColor))
         }
         .frame(minWidth: 720, idealWidth: 820, minHeight: 560, idealHeight: 700)
-        .overlay(alignment: .bottomTrailing) {
-            ZStack {
-                if let status = viewModel.modelDownloadStatus {
-                    ModelDownloadToast(status: status) {
-                        viewModel.dismissModelDownloadStatus()
-                    }
-                    .padding(20)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
-            }
-            .animation(.easeOut(duration: 0.18), value: viewModel.modelDownloadStatus != nil)
-        }
         .onAppear {
             viewModel.refreshModelCacheInfo()
         }
@@ -120,12 +108,12 @@ struct SettingsView: View {
                 Text("Models")
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Label("Text / Vision · MLX format", systemImage: "checkmark.seal.fill")
+                Label("Text · MLX format", systemImage: "checkmark.seal.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .labelStyle(.titleAndIcon)
             }
-            Text("LocalTutor ships Apple Silicon MLX models gated to your Mac's memory tier. Vision models can inspect images and figures; text-only models focus on readable source text.")
+            Text("LocalTutor ships Apple Silicon MLX models gated to your Mac's memory tier. Models focus on high-fidelity reasoning and processing of readable source text.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -138,12 +126,18 @@ struct SettingsView: View {
                         canRun: MemoryPreflight.evaluate(profile: profile, systemMemoryBytes: systemMemory).canRun,
                         cacheInfo: viewModel.cacheInfo(for: profile),
                         isRemovingDownload: viewModel.isRemovingCachedModel(profile),
-                        canRemoveDownload: viewModel.canRemoveCachedModel(profile)
-                    ) {
-                        viewModel.setActiveProfile(profile)
-                    } onRemoveDownload: {
-                        viewModel.removeCachedModel(profile)
-                    }
+                        canRemoveDownload: viewModel.canRemoveCachedModel(profile),
+                        downloadStatus: viewModel.modelDownloadStatus?.profileID == profile.id ? viewModel.modelDownloadStatus : nil,
+                        onSelect: {
+                            viewModel.setActiveProfile(profile)
+                        },
+                        onRemoveDownload: {
+                            viewModel.removeCachedModel(profile)
+                        },
+                        onDismissDownloadStatus: {
+                            viewModel.dismissModelDownloadStatus()
+                        }
+                    )
                 }
             }
         }
@@ -181,29 +175,37 @@ private struct ModelOptionRow: View {
     let cacheInfo: ModelCacheInfo
     let isRemovingDownload: Bool
     let canRemoveDownload: Bool
+    let downloadStatus: ModelDownloadStatus?
     var onSelect: () -> Void
     var onRemoveDownload: () -> Void
+    var onDismissDownloadStatus: () -> Void
 
     @State private var isShowingRemoveConfirmation = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Button(action: {
-                guard canRun else { return }
-                onSelect()
-            }) {
-                HStack(alignment: .top, spacing: 14) {
-                    radio
-                    content
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Button(action: {
+                    guard canRun else { return }
+                    onSelect()
+                }) {
+                    HStack(alignment: .top, spacing: 14) {
+                        radio
+                        content
+                    }
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!canRun)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .opacity(canRun ? 1.0 : 0.55)
+                .buttonStyle(.plain)
+                .disabled(!canRun)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .opacity(canRun ? 1.0 : 0.55)
 
-            cacheAction
+                cacheAction
+            }
+
+            if let status = downloadStatus {
+                progressSection(status: status)
+            }
         }
         .padding(16)
         .background(background)
@@ -227,6 +229,88 @@ private struct ModelOptionRow: View {
         } message: {
             Text("This frees \(cacheInfo.sizeDescription). The model will download again the next time you use it.")
         }
+        .animation(.easeOut(duration: 0.18), value: downloadStatus != nil)
+    }
+
+    @ViewBuilder
+    private func progressSection(status: ModelDownloadStatus) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+                .padding(.bottom, 4)
+            
+            HStack(spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(progressIconColor(for: status.phase).opacity(0.15))
+                        .frame(width: 24, height: 24)
+                    Image(systemName: progressIconName(for: status.phase))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(progressIconColor(for: status.phase))
+                }
+                
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(status.message)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                }
+                
+                Spacer()
+                
+                if status.phase == .ready || status.phase == .failed {
+                    Button(action: onDismissDownloadStatus) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .padding(4)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Dismiss")
+                }
+            }
+            
+            if status.phase != .ready && status.phase != .failed {
+                HStack(spacing: 8) {
+                    DownloadProgressMeter(fraction: status.fraction)
+                    
+                    Text(progressLabel(for: status))
+                        .font(.caption2.monospacedDigit().weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, alignment: .trailing)
+                }
+            }
+        }
+    }
+
+    private func progressIconName(for phase: ModelDownloadPhase) -> String {
+        switch phase {
+        case .checking, .loading:
+            "cpu"
+        case .downloading:
+            "arrow.down.circle.fill"
+        case .ready:
+            "checkmark.circle.fill"
+        case .failed:
+            "exclamationmark.triangle.fill"
+        }
+    }
+
+    private func progressIconColor(for phase: ModelDownloadPhase) -> Color {
+        switch phase {
+        case .ready:
+            .green
+        case .failed:
+            .orange
+        default:
+            .accentColor
+        }
+    }
+
+    private func progressLabel(for status: ModelDownloadStatus) -> String {
+        guard let fraction = status.fraction else {
+            return "..."
+        }
+        return DownloadProgressUpdate.percentText(for: fraction)
     }
 
     private var background: some View {
@@ -291,7 +375,7 @@ private struct ModelOptionRow: View {
             HStack(spacing: 14) {
                 metaItem(icon: "building.2", text: profile.publisher)
                 metaItem(icon: "cpu", text: profile.parameterScale)
-                if profile.supportsVision {
+                if ModelRuntimePolicyProvider.policy(for: profile).supportsVision {
                     metaItem(icon: "eye", text: "Vision")
                 } else {
                     metaItem(icon: "text.alignleft", text: "Text-only")

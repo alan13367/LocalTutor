@@ -89,6 +89,26 @@ enum ModelCatalog {
         strengths: ["Text-only", "Long context", "Fast MoE"]
     )
 
+    static let embeddingGemma300M = ModelProfile(
+        id: "embeddingGemma300M",
+        name: "Embedding Gemma 300M",
+        subtitle: "Background model for Dense Semantic Retrieval",
+        modelIdentifier: "mlx-community/embeddinggemma-300m-4bit",
+        kind: .text,
+        tier: .eightGB,
+        minimumSystemMemoryBytes: 4.gibibytes,
+        defaults: ModelRuntimeDefaults.text,
+        configuration: .llm(
+            ModelConfiguration(
+                id: "mlx-community/embeddinggemma-300m-4bit"
+            )
+        ),
+        publisher: "Google",
+        summary: "Lightweight embedding model used silently by the app for semantic retrieval.",
+        parameterScale: "300M params · 4-bit MLX",
+        strengths: ["Embeddings", "Fast", "Semantic Search"]
+    )
+
     /// The original v0 catalog. Retained so existing tests keep passing.
     static let v0Catalog: [ModelProfile] = [
         gemma4E2B,

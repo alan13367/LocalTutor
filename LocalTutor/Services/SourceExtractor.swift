@@ -99,8 +99,8 @@ enum SourceExtractor {
                 extracted = cached
             } else {
                 extracted = await extractOne(source, options: sourceOptions)
-                if shouldUseCache(for: source), extracted.includedImageCount == 0 {
-                    await SourceExtractionCache.shared.store(extracted.textOnlyCacheCopy, for: source)
+                if shouldUseCache(for: source) {
+                    await SourceExtractionCache.shared.store(extracted, for: source)
                 }
             }
 
@@ -112,14 +112,7 @@ enum SourceExtractor {
     }
 
     private static func shouldUseCache(for source: StudySource) -> Bool {
-        switch source.kind {
-        case .text:
-            return true
-        case .document:
-            return !["docx", "pages"].contains(source.fileExtension)
-        default:
-            return false
-        }
+        return true
     }
 
     private static func imagesDisabledWarning(for source: StudySource) -> String {
@@ -1085,9 +1078,8 @@ enum SourceExtractor {
 
 // MARK: - Cache
 
-/// Caches extracted text so refinements, regenerations, and follow-up turns in a
-/// session don't re-parse the same plain text/RTF/legacy Word files. Visual
-/// blocks are deliberately not cached so CIImage-backed memory does not build up.
+/// Caches extracted text and visual blocks so refinements, regenerations, and follow-up turns in a
+/// session don't re-parse the same files.
 actor SourceExtractionCache {
     static let shared = SourceExtractionCache()
     private static let entryLimit = 20
@@ -1115,7 +1107,7 @@ actor SourceExtractionCache {
     func store(_ extracted: ExtractedSource, for source: StudySource) {
         store[key(for: source)] = Entry(
             modified: currentModificationDate(for: source),
-            extracted: extracted.textOnlyCacheCopy,
+            extracted: extracted,
             lastAccessed: Date()
         )
         evictIfNeeded()

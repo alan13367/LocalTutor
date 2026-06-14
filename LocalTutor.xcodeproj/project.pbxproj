@@ -37,9 +37,9 @@
 /* Begin PBXFileReference section */
 		0E297C2228A7488B9848689E /* BenchmarkRecordTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BenchmarkRecordTests.swift; sourceTree = "<group>"; };
 		4E030123AA43908C03B6E293 /* InferenceProfileTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InferenceProfileTests.swift; sourceTree = "<group>"; };
-		8A1B2C3D4E5F6A7B8C9D0E2F /* InlineLatexRendererTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InlineLatexRendererTests.swift; sourceTree = "<group>"; };
 		69A0AC9384D73E9C72DEA760 /* LocalModelRunnerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LocalModelRunnerTests.swift; sourceTree = "<group>"; };
 		72375BAF9CA0C8D0980218C1 /* LocalTutorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LocalTutorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8A1B2C3D4E5F6A7B8C9D0E2F /* InlineLatexRendererTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InlineLatexRendererTests.swift; sourceTree = "<group>"; };
 		9C7A94C0E43A4F1FAE9A3210 /* MarkdownParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarkdownParserTests.swift; sourceTree = "<group>"; };
 		E18B94AB0EFC8197AE0BDFF7 /* MemoryPreflightTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryPreflightTests.swift; sourceTree = "<group>"; };
 		E74411EA2FC83B2900FB6366 /* LocalTutor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LocalTutor.app; sourceTree = BUILT_PRODUCTS_DIR; };

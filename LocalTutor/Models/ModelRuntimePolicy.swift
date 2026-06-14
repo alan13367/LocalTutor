@@ -54,7 +54,7 @@ enum ModelRuntimePolicyProvider {
         ModelRuntimePolicy(
             profileID: profile.id,
             profileName: profile.name,
-            supportsVision: profile.supportsVision,
+            supportsVision: false,
             systemMemoryBytes: systemMemoryBytes,
             minimumSystemMemoryBytes: profile.minimumSystemMemoryBytes,
             generationDefaults: profile.defaults,

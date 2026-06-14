@@ -409,7 +409,7 @@ actor LocalModelRunner: InferenceService {
 
 }
 
-private struct LocalDirectoryOnlyDownloader: Downloader {
+struct LocalDirectoryOnlyDownloader: Downloader {
     func download(
         id: String,
         revision: String?,

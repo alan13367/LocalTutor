@@ -297,7 +297,7 @@ struct SourceExtractorTests {
     }
 
     @Test
-    func sourceIndexFindsHeadingAfterFormerCharacterCap() throws {
+    func sourceIndexFindsHeadingAfterFormerCharacterCap() async throws {
         let source = StudySource(url: URL(fileURLWithPath: "/tmp/attention.pdf"))
         let filler = String(repeating: "Introduction filler text.\n", count: 700)
         let extracted = ExtractedSource(
@@ -315,14 +315,14 @@ struct SourceExtractorTests {
             ]
         )
 
-        let index = SourceIndexBuilder.build(from: extracted)
+        let index = await SourceIndexBuilder.build(from: extracted)
 
         #expect(index.chunks.contains { $0.headingPath.contains("5 Training") })
         #expect(index.chunks.contains { $0.text.contains("optimizer settings") })
     }
 
     @Test
-    func sourceRetrieverSelectsTrainingSectionByHeading() throws {
+    func sourceRetrieverSelectsTrainingSectionByHeading() async throws {
         let source = StudySource(url: URL(fileURLWithPath: "/tmp/attention.pdf"))
         let extracted = ExtractedSource(
             source: source,
@@ -344,9 +344,9 @@ struct SourceExtractorTests {
                 """)
             ]
         )
-        let index = SourceIndexBuilder.build(from: extracted)
+        let index = await SourceIndexBuilder.build(from: extracted)
 
-        let result = SourceRetriever.retrieve(
+        let result = await SourceRetriever.retrieve(
             query: "Can you summarize the Training Section of the paper?",
             indexes: [index]
         )
@@ -357,7 +357,7 @@ struct SourceExtractorTests {
     }
 
     @Test
-    func sourceRetrieverSelectsExactMarkdownPhaseNumber() throws {
+    func sourceRetrieverSelectsExactMarkdownPhaseNumber() async throws {
         let source = StudySource(url: URL(fileURLWithPath: "/tmp/roadmap.md"))
         let extracted = ExtractedSource(
             source: source,
@@ -383,9 +383,9 @@ struct SourceExtractorTests {
                 """)
             ]
         )
-        let index = SourceIndexBuilder.build(from: extracted)
+        let index = await SourceIndexBuilder.build(from: extracted)
 
-        let result = SourceRetriever.retrieve(
+        let result = await SourceRetriever.retrieve(
             query: "Can you explain phase 8 deeper?",
             indexes: [index]
         )
@@ -396,7 +396,7 @@ struct SourceExtractorTests {
     }
 
     @Test
-    func sourceRetrieverFallsBackToBM25ForWeakHeadingOverlap() throws {
+    func sourceRetrieverFallsBackToBM25ForWeakHeadingOverlap() async throws {
         let source = StudySource(url: URL(fileURLWithPath: "/tmp/attention.pdf"))
         let extracted = ExtractedSource(
             source: source,
@@ -413,9 +413,9 @@ struct SourceExtractorTests {
                 """)
             ]
         )
-        let index = SourceIndexBuilder.build(from: extracted)
+        let index = await SourceIndexBuilder.build(from: extracted)
 
-        let result = SourceRetriever.retrieve(
+        let result = await SourceRetriever.retrieve(
             query: "How does the model perform?",
             indexes: [index]
         )
@@ -425,7 +425,7 @@ struct SourceExtractorTests {
     }
 
     @Test
-    func sourceIndexPreservesNestedHeadingPath() throws {
+    func sourceIndexPreservesNestedHeadingPath() async throws {
         let source = StudySource(url: URL(fileURLWithPath: "/tmp/attention.pdf"))
         let extracted = ExtractedSource(
             source: source,
@@ -438,14 +438,14 @@ struct SourceExtractorTests {
             ]
         )
 
-        let index = SourceIndexBuilder.build(from: extracted)
+        let index = await SourceIndexBuilder.build(from: extracted)
         let nested = try #require(index.chunks.first { $0.text.contains("Sentence pairs") })
 
         #expect(nested.headingPath == ["5 Training", "5.1 Training Data and Batching"])
     }
 
     @Test
-    func sourceIndexDetectsMarkdownHeadings() throws {
+    func sourceIndexDetectsMarkdownHeadings() async throws {
         let source = StudySource(url: URL(fileURLWithPath: "/tmp/roadmap.md"))
         let extracted = ExtractedSource(
             source: source,
@@ -464,7 +464,7 @@ struct SourceExtractorTests {
             ]
         )
 
-        let index = SourceIndexBuilder.build(from: extracted)
+        let index = await SourceIndexBuilder.build(from: extracted)
         let deliverable = try #require(index.chunks.first { $0.text.contains("kernel binary") })
 
         #expect(deliverable.headingPath.contains("# GRUB-Compatible Rust Unix-Like OS Roadmap"))
@@ -473,14 +473,14 @@ struct SourceExtractorTests {
     }
 
     @Test
-    func sourceIndexFallsBackToPlainChunksWithoutHeadings() throws {
+    func sourceIndexFallsBackToPlainChunksWithoutHeadings() async throws {
         let source = StudySource(url: URL(fileURLWithPath: "/tmp/notes.txt"))
         let extracted = ExtractedSource(
             source: source,
             blocks: [.text(String(repeating: "Plain study note without numbered headings. ", count: 200))]
         )
 
-        let index = SourceIndexBuilder.build(from: extracted)
+        let index = await SourceIndexBuilder.build(from: extracted)
 
         #expect(!index.chunks.isEmpty)
         #expect(index.chunks.allSatisfy { $0.headingPath.isEmpty })

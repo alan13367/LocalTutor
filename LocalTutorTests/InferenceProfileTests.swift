@@ -86,7 +86,7 @@ struct InferenceProfileTests {
         #expect(e2B.cacheLimitBytes == 128 * 1024 * 1024)
         #expect(e4B.cacheLimitBytes == 64 * 1024 * 1024)
         #expect(qwen.cacheLimitBytes == 64 * 1024 * 1024)
-        #expect([e2B.documentImageLimit, e4B.documentImageLimit, qwen.documentImageLimit] == [1, 1, 4])
+        #expect([e2B.documentImageLimit, e4B.documentImageLimit, qwen.documentImageLimit] == [0, 0, 0])
     }
 
     @Test

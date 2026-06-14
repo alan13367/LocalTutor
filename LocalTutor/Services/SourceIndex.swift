@@ -15,7 +15,7 @@ struct SourceFingerprint: Codable, Equatable, Sendable {
 }
 
 struct SourceIndex: Codable, Equatable, Sendable {
-    static let schemaVersion = 2
+    static let schemaVersion = 3
 
     var sourceID: UUID
     var sourceName: String
@@ -48,6 +48,7 @@ struct SourceChunk: Codable, Equatable, Identifiable, Sendable {
     var ordinal: Int
     var text: String
     var estimatedTokenCount: Int
+    var embedding: [Float]?
 
     var headingTitle: String? {
         headingPath.last
@@ -68,12 +69,12 @@ struct SourceChunk: Codable, Equatable, Identifiable, Sendable {
 enum SourceIndexBuilder {
     static let targetChunkTokens = 700
 
-    static func build(from extracted: ExtractedSource) -> SourceIndex {
+    static func build(from extracted: ExtractedSource) async -> SourceIndex {
         let units = extracted.blocks.compactMap { block -> SourceTextUnit? in
             guard case .text(let text) = block else { return nil }
             return SourceTextUnit.parse(text, sourceName: extracted.source.displayName)
         }
-        let chunks = buildChunks(
+        let chunks = await buildChunks(
             units: units,
             sourceID: extracted.source.id,
             sourceName: extracted.source.displayName
@@ -92,13 +93,28 @@ enum SourceIndexBuilder {
         units: [SourceTextUnit],
         sourceID: UUID,
         sourceName: String
-    ) -> [SourceChunk] {
-        var chunks: [SourceChunk] = []
+    ) async -> [SourceChunk] {
         var headingStack: [SourceHeading] = []
         var bufferText = ""
         var locators: [String] = []
         var ordinal = 0
 
+        // In order to use await inside flush, we need to collect chunks asynchronously or await inline.
+        // Actually, to make the logic simple without changing the whole parser loop:
+        // We can just construct a temporary list of chunks, and then compute embeddings for them at the end.
+        // Or we can do it inside flush if flush is refactored, but it's a local function.
+        // Swift allows async closures but local functions can be async.
+        
+        // We'll collect chunk data first, then compute embeddings.
+        struct ChunkData {
+            var locator: String?
+            var headingPath: [String]
+            var ordinal: Int
+            var text: String
+            var estimatedTokenCount: Int
+        }
+        var pendingChunks: [ChunkData] = []
+        
         func flush() {
             let text = bufferText
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -109,11 +125,8 @@ enum SourceIndexBuilder {
             }
 
             ordinal += 1
-            chunks.append(
-                SourceChunk(
-                    id: "\(sourceID.uuidString)-\(ordinal)",
-                    sourceID: sourceID,
-                    sourceName: sourceName,
+            pendingChunks.append(
+                ChunkData(
                     locator: mergedLocator(locators),
                     headingPath: headingStack.map(\.displayTitle),
                     ordinal: ordinal,
@@ -170,7 +183,43 @@ enum SourceIndexBuilder {
         }
 
         flush()
-        return chunks
+        
+        // Generate embeddings concurrently for all chunks
+        let embeddings = await withTaskGroup(of: (Int, [Float]?).self) { group in
+            for (index, pending) in pendingChunks.enumerated() {
+                group.addTask {
+                    let searchableText = pending.text + " " + pending.headingPath.joined(separator: " ")
+                    let embedding = try? await LocalEmbeddingRunner.shared.embed(text: searchableText)
+                    return (index, embedding)
+                }
+            }
+
+            var results = [Int: [Float]?]()
+            for await (index, embedding) in group {
+                results[index] = embedding
+            }
+            return results
+        }
+
+        var finalChunks: [SourceChunk] = []
+        finalChunks.reserveCapacity(pendingChunks.count)
+        for (index, pending) in pendingChunks.enumerated() {
+            finalChunks.append(
+                SourceChunk(
+                    id: "\(sourceID.uuidString)-\(pending.ordinal)",
+                    sourceID: sourceID,
+                    sourceName: sourceName,
+                    locator: pending.locator,
+                    headingPath: pending.headingPath,
+                    ordinal: pending.ordinal,
+                    text: pending.text,
+                    estimatedTokenCount: pending.estimatedTokenCount,
+                    embedding: embeddings[index] ?? nil
+                )
+            )
+        }
+
+        return finalChunks
     }
 
     private static func mergedLocator(_ locators: [String]) -> String? {
@@ -319,10 +368,12 @@ actor SourceIndexStore {
         self.fileManager = fileManager
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "NaN")
         self.encoder = encoder
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "NaN")
         self.decoder = decoder
     }
 

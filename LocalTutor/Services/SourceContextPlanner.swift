@@ -198,7 +198,7 @@ enum SourceContextPlanner {
             remainingImages = max(0, remainingImages - extracted.includedImageCount)
 
             if cached == nil {
-                let index = SourceIndexBuilder.build(from: extracted)
+                let index = await SourceIndexBuilder.build(from: extracted)
                 indexes.append(index)
                 await SourceIndexStore.shared.store(index)
             }
@@ -317,7 +317,7 @@ enum SourceContextPlanner {
     ) async throws -> SourcePromptContext {
         let query = user.focus.trimmingCharacters(in: .whitespacesAndNewlines)
         await status(query.isEmpty ? "Retrieving sources" : "Retrieving \(query)")
-        let retrieval = SourceRetriever.retrieve(query: query, indexes: indexes)
+        let retrieval = await SourceRetriever.retrieve(query: query, indexes: indexes)
         let selected = retrieval.chunks.isEmpty ? chunks : retrieval.chunks
 
         if !selected.isEmpty,
