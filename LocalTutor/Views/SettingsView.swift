@@ -267,7 +267,7 @@ struct SettingsView: View {
         embeddingStatus = "Preparing semantic search"
         Task {
             do {
-                try await LocalEmbeddingRunner.shared.prepare { event in
+                try await SourceIndexCoordinator.shared.prepareEmbeddingModel { event in
                     await MainActor.run {
                         switch event {
                         case .downloading(let update):

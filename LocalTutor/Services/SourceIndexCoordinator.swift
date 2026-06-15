@@ -35,16 +35,19 @@ actor SourceIndexCoordinator {
 
     private let repository: any SourceIndexRepository
     private let embeddingService: any EmbeddingService
+    private let idleUnloadDelay: Duration
     private var tasks: [String: Task<Void, Never>] = [:]
     private var idleUnloadTask: Task<Void, Never>?
     private var tutorGenerationCount = 0
 
     init(
         repository: any SourceIndexRepository = SQLiteSourceIndexRepository.shared,
-        embeddingService: any EmbeddingService = LocalEmbeddingRunner.shared
+        embeddingService: any EmbeddingService = LocalEmbeddingRunner.shared,
+        idleUnloadDelay: Duration = .seconds(20)
     ) {
         self.repository = repository
         self.embeddingService = embeddingService
+        self.idleUnloadDelay = idleUnloadDelay
     }
 
     func cacheIndex(_ index: SourceIndex) async {
@@ -78,9 +81,20 @@ actor SourceIndexCoordinator {
         idleUnloadTask?.cancel()
         idleUnloadTask = nil
         defer { scheduleIdleUnload() }
-        await waitUntilTutorIsIdle()
+        try Task.checkCancellation()
         try await embeddingService.prepare { _ in }
         return try await embeddingService.embedQuery(text)
+    }
+
+    func prepareEmbeddingModel(
+        events: @escaping @Sendable (EmbeddingServiceEvent) async -> Void
+    ) async throws {
+        idleUnloadTask?.cancel()
+        idleUnloadTask = nil
+        defer { scheduleIdleUnload() }
+        await waitUntilTutorIsIdle()
+        try Task.checkCancellation()
+        try await embeddingService.prepare(events: events)
     }
 
     func statistics() async -> SourceIndexStatistics {
@@ -205,8 +219,14 @@ actor SourceIndexCoordinator {
     private func scheduleIdleUnload() {
         guard tasks.isEmpty else { return }
         idleUnloadTask?.cancel()
+        let delay = idleUnloadDelay
         idleUnloadTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(20))
+            do {
+                try await Task.sleep(for: delay)
+                try Task.checkCancellation()
+            } catch {
+                return
+            }
             await self?.unloadIfIdle()
         }
     }

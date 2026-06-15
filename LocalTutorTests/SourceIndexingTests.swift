@@ -38,6 +38,50 @@ struct SourceIndexingTests {
         )
     }
 
+    @Test("Foreground query embedding does not wait for tutor generation")
+    func foregroundQueryEmbedding() async throws {
+        let embeddingService = RecordingEmbeddingService()
+        let coordinator = SourceIndexCoordinator(
+            embeddingService: embeddingService,
+            idleUnloadDelay: .milliseconds(20)
+        )
+        await coordinator.setTutorGenerationActive(true)
+
+        let queryTask = Task {
+            try await coordinator.embedQuery("How does retrieval work?")
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        let queryCountWhileActive = await embeddingService.queryCount
+        await coordinator.setTutorGenerationActive(false)
+        _ = try await queryTask.value
+
+        #expect(queryCountWhileActive == 1)
+    }
+
+    @Test("Manual embedding preparation reschedules idle unload")
+    func manualPreparationUnload() async throws {
+        let embeddingService = RecordingEmbeddingService()
+        let coordinator = SourceIndexCoordinator(
+            embeddingService: embeddingService,
+            idleUnloadDelay: .milliseconds(200)
+        )
+
+        try await coordinator.prepareEmbeddingModel { _ in }
+        try await Task.sleep(for: .milliseconds(20))
+        try await coordinator.prepareEmbeddingModel { _ in }
+        try await Task.sleep(for: .milliseconds(50))
+
+        let unloadCountBeforeDelay = await embeddingService.unloadCount
+        #expect(unloadCountBeforeDelay == 0)
+
+        try await Task.sleep(for: .milliseconds(200))
+
+        let prepareCount = await embeddingService.prepareCount
+        let unloadCountAfterDelay = await embeddingService.unloadCount
+        #expect(prepareCount == 2)
+        #expect(unloadCountAfterDelay == 1)
+    }
+
     @Test(
         "Real EmbeddingGemma produces normalized 768-dimensional vectors",
         .enabled(if: ProcessInfo.processInfo.environment["LOCALTUTOR_RUN_EMBEDDING_INTEGRATION"] == "1")
@@ -270,5 +314,31 @@ struct SourceIndexingTests {
             text: id,
             estimatedTokenCount: 1
         )
+    }
+}
+
+private actor RecordingEmbeddingService: EmbeddingService {
+    private(set) var prepareCount = 0
+    private(set) var queryCount = 0
+    private(set) var unloadCount = 0
+
+    func prepare(
+        events: nonisolated(nonsending) @escaping @Sendable (EmbeddingServiceEvent) async -> Void
+    ) async throws {
+        prepareCount += 1
+        await events(.ready)
+    }
+
+    func embedQuery(_ text: String) async throws -> [Float] {
+        queryCount += 1
+        return [1]
+    }
+
+    func embedDocuments(_ documents: [EmbeddingDocument]) async throws -> [[Float]] {
+        documents.map { _ in [1] }
+    }
+
+    func unload() {
+        unloadCount += 1
     }
 }
