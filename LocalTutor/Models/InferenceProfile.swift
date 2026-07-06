@@ -80,6 +80,20 @@ struct ModelRuntimeDefaults: Equatable, Sendable {
         copy.prefillStepSize = prefillStepSize
         return copy
     }
+
+    func generateParameters(
+        maxTokensOverride: Int? = nil,
+        temperatureOverride: Float? = nil
+    ) -> GenerateParameters {
+        GenerateParameters(
+            maxTokens: maxTokensOverride,
+            maxKVSize: maxKVSize,
+            kvBits: kvBits,
+            temperature: temperatureOverride ?? temperature,
+            topP: topP,
+            prefillStepSize: prefillStepSize
+        )
+    }
 }
 
 typealias GenerationDefaults = ModelRuntimeDefaults

@@ -779,7 +779,7 @@ final class StudyWorkspaceViewModel: ObservableObject {
                             profile: profile,
                             runtimePolicy: runtimePolicy,
                             promptContent: content,
-                            maxTokens: nil,
+                            maxTokens: maxTokens,
                             temperature: temperature
                         )
                         let record = try await self.inferenceService.run(request: request) { [weak self] event in
@@ -903,7 +903,9 @@ final class StudyWorkspaceViewModel: ObservableObject {
             scheduleReasoningFlush(turnID: turnID)
         case .outputChunk(let chunk):
             pendingChunks += chunk
-            updateStatusIfStreaming(turnID: turnID, message: "Writing answer")
+            if let message = Self.immediateOutputStatus(for: kind) {
+                updateStatusIfStreaming(turnID: turnID, message: message)
+            }
             scheduleFlush(turnID: turnID, kind: kind)
         }
     }
@@ -944,12 +946,19 @@ final class StudyWorkspaceViewModel: ObservableObject {
         guard !pendingReasoningChunks.isEmpty else { return }
         let chunk = pendingReasoningChunks
         pendingReasoningChunks = ""
+        let isWaitingForVisibleOutput = pendingChunks.isEmpty
         updateTurn(turnID) { turn in
             turn.assistant.reasoning += chunk
-            if turn.assistant.status == .streaming {
+            if turn.assistant.status == .streaming,
+               turn.assistant.markdown.isEmpty,
+               isWaitingForVisibleOutput {
                 turn.assistant.statusMessage = "Thinking"
             }
         }
+    }
+
+    nonisolated static func immediateOutputStatus(for kind: StudyResourceKind) -> String? {
+        kind.isInteractive ? nil : "Writing answer"
     }
 
     private static func interactiveProgressMessage(for kind: StudyResourceKind, raw: String) -> String {

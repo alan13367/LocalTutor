@@ -435,7 +435,7 @@ enum SourceContextPlanner {
                 total: groups.count,
                 maxSummaryTokens: maxSummaryTokens
             )
-            let output = try await generateIntermediate(prompt, nil, 0.1)
+            let output = try await generateIntermediate(prompt, maxSummaryTokens, 0.1)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !output.isEmpty else {
                 throw SourceContextPlannerError.intermediateFailed("The local model returned an empty source summary.")

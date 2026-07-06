@@ -628,6 +628,50 @@ struct SourceExtractorTests {
     }
 
     @Test
+    func targetedSectionDistillationUsesBoundedIntermediateGeneration() async throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("optimization.md")
+        let section = String(
+            repeating: "Profile rendering latency, preserve correctness, compare measurements, and document each optimization. ",
+            count: 500
+        )
+        try """
+        # Performance Manual
+
+        ## Phase 7 Optimization
+        \(section)
+
+        ## Appendix
+        Short reference material.
+        """.write(to: url, atomically: true, encoding: .utf8)
+
+        let recorder = IntermediateRequestRecorder()
+        let source = StudySource(url: url)
+        let user = StudyTurnUser(
+            focus: "Summarize section Phase 7 Optimization",
+            resourceKind: .summary,
+            sources: [source],
+            isRefinement: false
+        )
+
+        let content = try await SourceContextPlanner.content(
+            for: user,
+            history: [],
+            profile: .gemma4E4B,
+            generateIntermediate: { _, maxTokens, _ in
+                await recorder.record(maxTokens)
+                return "A concise source-grounded optimization summary."
+            },
+            status: { _ in }
+        )
+
+        let maxTokens = await recorder.maxTokens
+        #expect(!maxTokens.isEmpty)
+        #expect(maxTokens.allSatisfy { $0 == 512 })
+        #expect(content.benchmarkText.contains("Distilled ## Phase 7 Optimization source summaries selected."))
+    }
+
+    @Test
     func wholeDocumentGroupingUsesSectionsBeforeSynthesis() throws {
         let sourceID = UUID()
         let chunks = [
@@ -764,5 +808,13 @@ private actor IntermediateCallCounter {
 
     func increment() {
         value += 1
+    }
+}
+
+private actor IntermediateRequestRecorder {
+    var maxTokens: [Int?] = []
+
+    func record(_ value: Int?) {
+        maxTokens.append(value)
     }
 }

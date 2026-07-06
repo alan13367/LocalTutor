@@ -113,6 +113,13 @@ struct LocalModelRunnerTests {
     }
 
     @Test
+    func interactiveOutputDoesNotReplaceStructuredProgressStatus() {
+        #expect(StudyWorkspaceViewModel.immediateOutputStatus(for: .quiz) == nil)
+        #expect(StudyWorkspaceViewModel.immediateOutputStatus(for: .flashcards) == nil)
+        #expect(StudyWorkspaceViewModel.immediateOutputStatus(for: .summary) == "Writing answer")
+    }
+
+    @Test
     func downloadProgressTrackerSuppressesAlreadyCachedCompletion() {
         let tracker = DownloadProgressTracker(temporaryDirectory: nil)
         let progress = Progress(totalUnitCount: 100)

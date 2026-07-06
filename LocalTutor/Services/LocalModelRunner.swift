@@ -145,7 +145,6 @@ actor LocalModelRunner: InferenceService {
 
         do {
             Memory.cacheLimit = runtimePolicy.cacheLimitBytes
-            Memory.clearCache()
             Memory.peakMemory = 0
             mlxMemoryBefore = MLXMemorySnapshotRecord(snapshot: Memory.snapshot())
 
@@ -155,7 +154,6 @@ actor LocalModelRunner: InferenceService {
             let container = loadResult.container
             downloadSeconds = loadResult.downloadSeconds
             loadSeconds = max(0, Date().timeIntervalSince(loadStart) - downloadSeconds)
-            Memory.clearCache()
 
             try Task.checkCancellation()
             await events(.stage(LocalModelRunnerStage.preparingPrompt))
@@ -164,7 +162,6 @@ actor LocalModelRunner: InferenceService {
                 promptContent: request.promptContent,
                 runtimePolicy: runtimePolicy
             )
-            Memory.clearCache()
 
             try Task.checkCancellation()
             await events(.stage(LocalModelRunnerStage.generating))
@@ -283,9 +280,7 @@ actor LocalModelRunner: InferenceService {
         defer { isRunning = false }
 
         Memory.cacheLimit = runtimePolicy.cacheLimitBytes
-        Memory.clearCache()
         _ = try await loadContainerIfNeeded(profile: profile, events: events)
-        Memory.clearCache()
     }
 
     func clearCache() async throws {
@@ -426,19 +421,6 @@ struct LocalDirectoryOnlyDownloader: Downloader {
 private struct LoadedContainer: Sendable {
     var container: ModelContainer
     var downloadSeconds: Double
-}
-
-private extension ModelRuntimeDefaults {
-    func generateParameters(maxTokensOverride _: Int? = nil, temperatureOverride: Float? = nil) -> GenerateParameters {
-        GenerateParameters(
-            maxTokens: nil,
-            maxKVSize: maxKVSize,
-            kvBits: kvBits,
-            temperature: temperatureOverride ?? temperature,
-            topP: topP,
-            prefillStepSize: prefillStepSize
-        )
-    }
 }
 
 private extension BenchmarkTokenMetrics {

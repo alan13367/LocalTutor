@@ -99,4 +99,15 @@ struct InferenceProfileTests {
         #expect(PromptPacker.promptBudget(for: e4B, resourceKind: .summary) == 682)
         #expect(PromptPacker.promptBudget(for: e4B, resourceKind: .quiz) == 682)
     }
+
+    @Test
+    func generationParameterOverridesAreHonored() {
+        let parameters = ModelRuntimeDefaults.text.generateParameters(
+            maxTokensOverride: 128,
+            temperatureOverride: 0.05
+        )
+
+        #expect(parameters.maxTokens == 128)
+        #expect(parameters.temperature == 0.05)
+    }
 }
