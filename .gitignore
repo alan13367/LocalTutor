@@ -1,6 +1,40 @@
+# macOS
 .DS_Store
-LocalTutor.xcodeproj/project.xcworkspace
-LocalTutor.xcodeproj/project.xcworkspace/xcuserdata
-LocalTutor.xcodeproj/project.xcworkspace/xcuserdata/local.xcuserdatad
-LocalTutor.xcodeproj/project.xcworkspace/xcuserdata/local.xcuserdatad/UserInterfaceState.xcuserstate
-LocalTutor.xcodeproj/project.xcworkspace/xcuserdata/local.xcuserdatad/UserInterfaceState.xcuserstate
+.AppleDouble
+.LSOverride
+._*
+
+# Xcode user state (changes on every open/debug session)
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Build output
+DerivedData/
+build/
+*.xcarchive
+*.dSYM
+*.dSYM.zip
+*.ipa
+*.app
+*.pkg
+*.dmg
+
+# Swift Package Manager (Package.resolved stays tracked to pin dependencies)
+.build/
+.swiftpm/
+Packages/
+
+# Test and profiling artifacts
+*.xcresult
+*.trace
+
+# Release/notarization leftovers
+*.zip
+notarization*.json
+
+# Editors and agents
+.vscode/
+.idea/
+.claude/settings.local.json
