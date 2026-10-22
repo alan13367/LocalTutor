@@ -125,6 +125,21 @@ final class SourceLibrary {
         indexStates[source.id] = nil
     }
 
+    @discardableResult
+    func relink(_ source: StudySource, to url: URL, in notebookID: UUID) -> StudySource? {
+        var relinked: StudySource?
+        store.updateSource(source.id, in: notebookID) { stored in
+            stored.url = url
+            stored.bookmarkData = StudySource.makeBookmark(for: url)
+            relinked = stored
+        }
+        if let relinked {
+            indexStates[relinked.id] = nil
+            enqueueIndexing(relinked, notebookID: notebookID)
+        }
+        return relinked
+    }
+
     func setEnabled(_ enabled: Bool, source: StudySource, in notebookID: UUID) {
         store.updateSource(source.id, in: notebookID) { $0.isEnabled = enabled }
     }

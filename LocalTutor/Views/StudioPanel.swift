@@ -39,36 +39,37 @@ struct StudioPanel: View {
     private var generators: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Studio")
-                .font(.title3.weight(.semibold))
-            TextField("Optional focus, e.g. \"Chapter 3\" or \"photosynthesis\"", text: $focus)
+                .font(.headline)
+            TextField("Focus (optional), e.g. \"Chapter 3\"", text: $focus)
                 .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
                 .accessibilityLabel("Focus topic for generated materials")
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
                 ForEach(StudyResourceKind.studioKinds) { kind in
                     Button {
                         generate(kind)
                     } label: {
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(spacing: 6) {
                             Image(systemName: kind.systemImage)
-                                .font(.system(size: 16, weight: .semibold))
+                                .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(.tint)
+                                .frame(height: 20)
                             Text(kind.title)
-                                .font(.callout.weight(.semibold))
+                                .font(.caption.weight(.semibold))
                                 .foregroundStyle(.primary)
-                            Text(kind.shortDescription)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
                                 .lineLimit(2, reservesSpace: true)
-                                .multilineTextAlignment(.leading)
+                                .multilineTextAlignment(.center)
+                                .minimumScaleFactor(0.85)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 4)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
                     .disabled(!canGenerate)
-                    .help(canGenerate ? "Create a \(kind.title.lowercased())" : disabledReason)
+                    .help(canGenerate ? "\(kind.title): \(kind.shortDescription)" : disabledReason)
                     .accessibilityLabel("Create \(kind.title)")
                     .accessibilityHint(kind.shortDescription)
                 }

@@ -6,12 +6,17 @@
 import AppKit
 import PDFKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct CitationSourceView: View {
+    @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let presentation: CitationPresentation
 
     @State private var context: CitationContext?
+    @State private var source: StudySource?
+    @State private var isPDFUnavailable = false
+    @State private var isLocating = false
 
     private var citation: SourceCitation { presentation.citation }
 
@@ -19,16 +24,53 @@ struct CitationSourceView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if let source = presentation.source, source.kind == .pdf, citation.page != nil {
-                CitationPDFView(url: source.accessibleURL, page: citation.page ?? 1, excerpt: citation.excerpt)
+            if let source, source.kind == .pdf, citation.page != nil, !isPDFUnavailable {
+                CitationPDFView(url: source.accessibleURL, page: citation.page ?? 1, excerpt: citation.excerpt) {
+                    isPDFUnavailable = true
+                }
+                .id(source.bookmarkData)
             } else {
+                if isPDFUnavailable {
+                    accessBanner
+                }
                 textContext
             }
         }
         .frame(minWidth: 720, idealWidth: 820, minHeight: 560, idealHeight: 720)
+        .onAppear { source = presentation.source }
         .task {
             context = await CitationContext.load(for: citation, source: presentation.source)
         }
+        .fileImporter(isPresented: $isLocating, allowedContentTypes: [.pdf]) { result in
+            guard case .success(let url) = result, let current = source,
+                  let notebookID = app.store.notebooks.first(where: { $0.sources.contains { $0.id == current.id } })?.id,
+                  let relinked = app.library.relink(current, to: url, in: notebookID) else { return }
+            source = relinked
+            isPDFUnavailable = false
+        }
+        .fileDialogDefaultDirectory(source?.url.deletingLastPathComponent())
+    }
+
+    private var accessBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "lock.doc")
+                .font(.title3)
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("LocalTutor can’t open the original PDF")
+                    .font(.callout.weight(.semibold))
+                Text("Locate the file once to see the highlighted page. The cited passage is shown below.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Locate File…") { isLocating = true }
+                .buttonStyle(.glassProminent)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(Color.orange.opacity(0.08))
     }
 
     private var header: some View {
@@ -49,7 +91,7 @@ struct CitationSourceView: View {
                     .lineLimit(1)
             }
             Spacer()
-            if let source = presentation.source {
+            if let source {
                 Button("Open in Default App", systemImage: "arrow.up.forward.app") {
                     let url = source.accessibleURL
                     let granted = url.startAccessingSecurityScopedResource()
@@ -136,6 +178,7 @@ private struct CitationPDFView: NSViewRepresentable {
     let url: URL
     let page: Int
     let excerpt: String
+    var onUnavailable: @MainActor @Sendable () -> Void
 
     func makeNSView(context: Context) -> PDFView {
         let view = PDFView()
@@ -150,19 +193,31 @@ private struct CitationPDFView: NSViewRepresentable {
 
     private func load(into view: PDFView) {
         let granted = url.startAccessingSecurityScopedResource()
-        defer { if granted { url.stopAccessingSecurityScopedResource() } }
-        guard let document = PDFDocument(url: url) else { return }
+        let data = try? Data(contentsOf: url, options: .mappedIfSafe)
+        if granted { url.stopAccessingSecurityScopedResource() }
+        guard let data, let document = PDFDocument(data: data) else {
+            DispatchQueue.main.async { onUnavailable() }
+            return
+        }
         view.document = document
-        guard let target = document.page(at: max(0, page - 1)) else { return }
-        view.go(to: target)
+        guard let target = document.page(at: min(max(0, page - 1), document.pageCount - 1)) else { return }
 
         let needle = Self.searchNeedle(from: excerpt)
-        guard !needle.isEmpty else { return }
-        let matches = document.findString(needle, withOptions: [.caseInsensitive])
-        if let match = matches.first(where: { $0.pages.contains(target) }) ?? matches.first {
-            match.color = NSColor.systemYellow.withAlphaComponent(0.5)
-            view.highlightedSelections = [match]
-            view.go(to: match)
+        let matches = needle.isEmpty ? [] : document.findString(needle, withOptions: [.caseInsensitive])
+        let nearby = (max(0, page - 2)...page).compactMap(document.page(at:))
+        let match = matches.first { $0.pages.contains(target) }
+            ?? matches.first { !Set($0.pages).isDisjoint(with: nearby) }
+        match?.color = NSColor.systemYellow.withAlphaComponent(0.5)
+
+        DispatchQueue.main.async {
+            if let match, let matchPage = match.pages.first {
+                view.highlightedSelections = [match]
+                var bounds = match.bounds(for: matchPage)
+                bounds.size.height += 140
+                view.go(to: bounds, on: matchPage)
+            } else {
+                view.go(to: target)
+            }
         }
     }
 
@@ -175,3 +230,4 @@ private struct CitationPDFView: NSViewRepresentable {
         return String(line.prefix(60))
     }
 }
+

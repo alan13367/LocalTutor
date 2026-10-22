@@ -187,8 +187,14 @@ struct StudySource: Identifiable, Equatable, Hashable, Codable {
         displayName = url.lastPathComponent
         fileExtension = url.pathExtension.lowercased()
         kind = StudySource.kind(for: url)
-        bookmarkData = try? url.bookmarkData(
-            options: .withSecurityScope,
+        bookmarkData = StudySource.makeBookmark(for: url)
+    }
+
+    static func makeBookmark(for url: URL) -> Data? {
+        let granted = url.startAccessingSecurityScopedResource()
+        defer { if granted { url.stopAccessingSecurityScopedResource() } }
+        return try? url.bookmarkData(
+            options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )

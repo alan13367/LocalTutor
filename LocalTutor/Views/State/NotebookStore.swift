@@ -12,11 +12,7 @@ final class NotebookStore {
     private static let saveDelay: Duration = .milliseconds(700)
 
     private(set) var notebooks: [Notebook] = []
-    var selectedNotebookID: UUID? {
-        didSet {
-            UserDefaults.standard.set(selectedNotebookID?.uuidString, forKey: AppStorageKeys.selectedNotebookID)
-        }
-    }
+    var selectedNotebookID: UUID?
     var selectedChatIDs: [UUID: UUID] = [:]
 
     @ObservationIgnored private let persistence: NotebookPersistence?
@@ -34,8 +30,6 @@ final class NotebookStore {
             }
             notebooks = loaded.sorted { $0.updatedAt > $1.updatedAt }
         }
-        let storedID = UserDefaults.standard.string(forKey: AppStorageKeys.selectedNotebookID).flatMap(UUID.init(uuidString:))
-        selectedNotebookID = notebooks.first(where: { $0.id == storedID })?.id ?? notebooks.first?.id
     }
 
     // MARK: - Lookup
@@ -82,7 +76,7 @@ final class NotebookStore {
         selectedChatIDs[id] = nil
         dirtyIDs.remove(id)
         if selectedNotebookID == id {
-            selectedNotebookID = notebooks.first?.id
+            selectedNotebookID = nil
         }
         Task { [persistence] in await persistence?.delete(id) }
     }

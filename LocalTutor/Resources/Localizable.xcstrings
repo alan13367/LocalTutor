@@ -44,6 +44,16 @@
         }
       }
     },
+    "%@ / %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ / %2$@"
+          }
+        }
+      }
+    },
     "%@ %@ reads up to %@ tokens (about %@ words of sources) per question." : {
       "localizations" : {
         "en" : {
@@ -107,6 +117,9 @@
         }
       }
     },
+    "%lld due" : {
+
+    },
     "%lld left · %lld reviewed" : {
       "localizations" : {
         "en" : {
@@ -166,10 +179,13 @@
         }
       }
     },
+    "⌘N" : {
+
+    },
     "A" : {
 
     },
-    "A notebook holds the sources for one subject. Ask questions, and LocalTutor answers with citations, all on your Mac." : {
+    "A notebook holds the sources for one subject. Ask questions and LocalTutor answers with citations, all on your Mac." : {
 
     },
     "About" : {
@@ -181,13 +197,7 @@
     "Add" : {
 
     },
-    "Add PDFs, documents, slides, images or web pages" : {
-
-    },
-    "Add Sources" : {
-
-    },
-    "Add sources (⌘O)" : {
+    "Add PDFs, documents, slides, images or web pages (⌘O)" : {
 
     },
     "Add Sources…" : {
@@ -199,7 +209,13 @@
     "All caught up" : {
 
     },
+    "All notebooks (⌘[)" : {
+
+    },
     "Answer: %@" : {
+
+    },
+    "Answers use search" : {
 
     },
     "Apple Intelligence" : {
@@ -268,6 +284,9 @@
     "Context size" : {
 
     },
+    "Context used" : {
+
+    },
     "Continue with %@" : {
 
     },
@@ -281,9 +300,6 @@
 
     },
     "Create %@" : {
-
-    },
-    "Create a notebook to get started." : {
 
     },
     "Create Again" : {
@@ -381,7 +397,7 @@
     "Export…" : {
 
     },
-    "Failed · tap for details" : {
+    "Failed · click for details" : {
 
     },
     "Faster generation (multi-token prediction)" : {
@@ -396,6 +412,9 @@
     "Flip to see the answer" : {
 
     },
+    "Focus (optional), e.g. \"Chapter 3\"" : {
+
+    },
     "Focus topic for generated materials" : {
 
     },
@@ -403,9 +422,6 @@
 
     },
     "Generate Source Guide" : {
-
-    },
-    "Generating" : {
 
     },
     "Grade this card" : {
@@ -427,6 +443,12 @@
 
     },
     "Host B" : {
+
+    },
+    "How did you do?" : {
+
+    },
+    "I got it" : {
 
     },
     "Icon" : {
@@ -456,13 +478,25 @@
     "Its chats, notes and study materials will be removed. Your original files are not touched." : {
 
     },
-    "Large notebook: answers use search" : {
+    "Jump to latest" : {
 
     },
     "LocalTutor" : {
 
     },
+    "LocalTutor can’t open the original PDF" : {
+
+    },
+    "LocalTutor lost permission to read this file after relaunching. Locate it once to show pages and re-index." : {
+
+    },
     "LocalTutor picked the best model for this Mac. You can change it anytime in Settings." : {
+
+    },
+    "Locate File…" : {
+
+    },
+    "Locate the file once to see the highlighted page. The cited passage is shown below." : {
 
     },
     "Metrics" : {
@@ -477,10 +511,17 @@
     "Model Lab" : {
 
     },
-    "Models" : {
-
+    "Model: %@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Model: %1$@, %2$@"
+          }
+        }
+      }
     },
-    "Models and settings (⌘,)" : {
+    "Models" : {
 
     },
     "Name" : {
@@ -510,9 +551,6 @@
     "Next line" : {
 
     },
-    "Nice work" : {
-
-    },
     "Nice work: %lld review%@" : {
       "localizations" : {
         "en" : {
@@ -529,10 +567,10 @@
     "No models downloaded." : {
 
     },
-    "No notebook" : {
+    "Not quite" : {
 
     },
-    "Notebook name" : {
+    "Notebook" : {
 
     },
     "Notebooks" : {
@@ -553,10 +591,10 @@
     "Open in Default App" : {
 
     },
-    "Optional focus, e.g. \"Chapter 3\" or \"photosynthesis\"" : {
+    "Optional Image" : {
 
     },
-    "Optional Image" : {
+    "Or drop PDFs, slides and notes anywhere in this window." : {
 
     },
     "Output" : {
@@ -578,6 +616,9 @@
 
     },
     "Practice Again" : {
+
+    },
+    "Press %@" : {
 
     },
     "Preview" : {
@@ -657,10 +698,16 @@
     "Rename Notebook" : {
 
     },
+    "Rename, change icon or delete this notebook" : {
+
+    },
     "Rename…" : {
 
     },
     "Restart" : {
+
+    },
+    "Restore file access…" : {
 
     },
     "Resume" : {
@@ -691,6 +738,9 @@
 
     },
     "Save to Notes" : {
+
+    },
+    "Search notebooks" : {
 
     },
     "See results" : {
@@ -816,6 +866,9 @@
     "Try Again" : {
 
     },
+    "Try the Sample" : {
+
+    },
     "Try the sample notebook" : {
 
     },
@@ -859,6 +912,9 @@
 
     },
     "You can pause anytime and pick up where you left off, even after quitting." : {
+
+    },
+    "Your notebooks" : {
 
     },
     "Your private study partner. Add your notes and textbooks, ask questions, and get answers with citations, all running on this Mac." : {

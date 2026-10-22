@@ -6,19 +6,49 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Environment(AppModel.self) private var app
+    @State private var isImporting = false
+    @State private var isDropTargeted = false
 
     var body: some View {
         Group {
-            if app.hasCompletedOnboarding {
-                NotebookWorkspaceView()
-            } else {
+            if !app.hasCompletedOnboarding {
                 OnboardingView()
+            } else if let notebook = app.selectedNotebook {
+                NotebookWorkspaceView(notebook: notebook, onAddSources: { isImporting = true })
+                    .transition(.opacity)
+            } else {
+                NavigationStack {
+                    HomeView(onAddSources: { isImporting = true })
+                }
+                .transition(.opacity)
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: app.store.selectedNotebookID)
         .frame(minWidth: 1080, maxWidth: .infinity, minHeight: 700, maxHeight: .infinity)
+        .fileImporter(
+            isPresented: $isImporting,
+            allowedContentTypes: app.library.supportedContentTypes(supportsVision: app.models.supportsVision),
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls):
+                app.importSources(urls)
+            case .failure(let error):
+                app.globalError = error.localizedDescription
+            }
+        }
+        .onDrop(of: [UTType.fileURL], isTargeted: $isDropTargeted) { providers in
+            guard app.hasCompletedOnboarding else { return false }
+            return app.importDrop(providers)
+        }
+        .overlay(FullWindowDropOverlay(isActive: isDropTargeted && app.hasCompletedOnboarding))
+        .onReceive(NotificationCenter.default.publisher(for: .localTutorAddSources)) { _ in
+            if app.hasCompletedOnboarding { isImporting = true }
+        }
         .overlay(alignment: .top) {
             BannerStack()
                 .padding(.top, 12)

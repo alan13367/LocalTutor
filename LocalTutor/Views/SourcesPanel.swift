@@ -11,15 +11,15 @@ struct SourcesPanel: View {
     var onAdd: () -> Void
 
     @State private var expandedSourceIDs: Set<UUID> = []
-    @State private var titleDraft = ""
-    @FocusState private var isEditingTitle: Bool
+    @State private var locatingSource: StudySource?
+    @State private var isLocating = false
 
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 10)
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
 
             if notebook.sources.isEmpty {
                 emptyState
@@ -37,6 +37,10 @@ struct SourcesPanel: View {
                                 onToggleEnabled: { app.library.setEnabled($0, source: source, in: notebook.id) },
                                 onGenerateGuide: { app.library.generateGuide(for: source, in: notebook.id) },
                                 onAsk: { question in app.chat.ask(question, in: notebook.id) },
+                                onLocate: {
+                                    locatingSource = source
+                                    isLocating = true
+                                },
                                 onRemove: { app.library.remove(source, from: notebook.id) }
                             )
                         }
@@ -52,19 +56,24 @@ struct SourcesPanel: View {
                         }
                     }
                 }
-                .listStyle(.inset)
-                .scrollContentBackground(.hidden)
+                .listStyle(.sidebar)
 
                 ContextBudgetMeter(notebook: notebook)
-                    .padding(12)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                    .padding(.top, 4)
             }
         }
-        .background(.background.secondary)
-        .onAppear { titleDraft = notebook.title }
-        .onChange(of: notebook.id) { _, _ in titleDraft = notebook.title }
-        .onChange(of: notebook.title) { _, newValue in
-            if !isEditingTitle { titleDraft = newValue }
+        .fileImporter(
+            isPresented: $isLocating,
+            allowedContentTypes: app.library.supportedContentTypes(supportsVision: true)
+        ) { result in
+            if case .success(let url) = result, let locatingSource {
+                app.library.relink(locatingSource, to: url, in: notebook.id)
+            }
+            locatingSource = nil
         }
+        .fileDialogDefaultDirectory(locatingSource?.url.deletingLastPathComponent())
     }
 
     private var allEnabled: Bool {
@@ -72,30 +81,16 @@ struct SourcesPanel: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TextField("Notebook name", text: $titleDraft, axis: .vertical)
-                .lineLimit(1...2)
-                .textFieldStyle(.plain)
-                .font(.title3.weight(.semibold))
-                .focused($isEditingTitle)
-                .onSubmit { commitTitle() }
-                .onChange(of: isEditingTitle) { _, editing in
-                    if !editing { commitTitle() }
-                }
-                .accessibilityLabel("Notebook name")
-
-            HStack {
-                Label("Sources", systemImage: "tray.full")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button(action: onAdd) {
-                    Label("Add", systemImage: "plus")
-                }
-                .buttonStyle(.glass)
-                .controlSize(.small)
-                .help("Add PDFs, documents, slides, images or web pages")
+        HStack {
+            Text("Sources")
+                .font(.headline)
+            Spacer()
+            Button(action: onAdd) {
+                Label("Add", systemImage: "plus")
             }
+            .buttonStyle(.glass)
+            .controlSize(.small)
+            .help("Add PDFs, documents, slides, images or web pages (⌘O)")
         }
     }
 
@@ -129,10 +124,6 @@ struct SourcesPanel: View {
             }
         }
     }
-
-    private func commitTitle() {
-        app.store.renameNotebook(notebook.id, to: titleDraft)
-    }
 }
 
 // MARK: - Source row
@@ -147,6 +138,7 @@ private struct SourceRow: View {
     var onToggleEnabled: (Bool) -> Void
     var onGenerateGuide: () -> Void
     var onAsk: (String) -> Void
+    var onLocate: () -> Void
     var onRemove: () -> Void
 
     var body: some View {
@@ -168,6 +160,15 @@ private struct SourceRow: View {
                         .truncationMode(.middle)
                         .help(source.displayName)
                     statusText
+                    if source.bookmarkData == nil {
+                        Button(action: onLocate) {
+                            Label("Restore file access…", systemImage: "lock.trianglebadge.exclamationmark")
+                                .font(.caption2.weight(.medium))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.orange)
+                        .help("LocalTutor lost permission to read this file after relaunching. Locate it once to show pages and re-index.")
+                    }
                 }
 
                 Spacer(minLength: 4)
@@ -199,6 +200,7 @@ private struct SourceRow: View {
             Button("Show in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([source.accessibleURL])
             }
+            Button("Locate File…", action: onLocate)
             Button(source.guide == nil ? "Generate Source Guide" : "Regenerate Source Guide", action: onGenerateGuide)
                 .disabled(isGeneratingGuide || source.isImage)
             Divider()
@@ -303,26 +305,25 @@ private struct ContextBudgetMeter: View {
             let budget = policy.sourceTokenBudget(for: .ask)
             let fits = used <= budget
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
+                HStack(spacing: 6) {
                     Image(systemName: fits ? "checkmark.circle.fill" : "magnifyingglass.circle.fill")
                         .foregroundStyle(fits ? .green : .blue)
                         .accessibilityHidden(true)
-                    Text(fits ? "Whole notebook in context" : "Large notebook: answers use search")
+                    Text(fits ? "Whole notebook in context" : "Answers use search")
                         .font(.caption.weight(.semibold))
-                    Spacer()
+                    Spacer(minLength: 4)
+                    Text("\(TokenCountLabel.short(used)) / \(TokenCountLabel.short(budget))")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
-                ProgressView(value: min(1, Double(used) / Double(max(1, budget))))
+                DownloadProgressMeter(fraction: min(1, Double(used) / Double(max(1, budget))), label: "Context used")
                     .tint(fits ? .green : .blue)
-                Text(fits
-                     ? "\(TokenCountLabel.text(used)) of \(TokenCountLabel.text(budget)). Follow-up questions reuse the already-read sources, so they start much faster."
-                     : "\(TokenCountLabel.text(used)) exceeds the \(TokenCountLabel.text(budget)) budget for \(policy.profileName). Each question retrieves the most relevant passages.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(4)
             }
-            .frame(minWidth: 200)
             .padding(10)
             .glassEffect(.regular, in: .rect(cornerRadius: 12))
+            .help(fits
+                  ? "\(TokenCountLabel.text(used)) of \(TokenCountLabel.text(budget)). Follow-up questions reuse the already-read sources, so they start much faster."
+                  : "\(TokenCountLabel.text(used)) exceeds the \(TokenCountLabel.text(budget)) budget for \(policy.profileName). Each question retrieves the most relevant passages.")
             .accessibilityElement(children: .combine)
         }
     }
@@ -331,5 +332,9 @@ private struct ContextBudgetMeter: View {
 enum TokenCountLabel {
     static func text(_ tokens: Int) -> String {
         tokens >= 1_000 ? String(format: "%.1fK tokens", Double(tokens) / 1_000) : "\(tokens) tokens"
+    }
+
+    static func short(_ tokens: Int) -> String {
+        tokens >= 1_000 ? String(format: "%.0fK", Double(tokens) / 1_000) : "\(tokens)"
     }
 }

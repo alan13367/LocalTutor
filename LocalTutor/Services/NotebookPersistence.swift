@@ -66,6 +66,9 @@ actor NotebookPersistence {
     /// settled into a terminal state on load.
     nonisolated static func sanitize(_ notebook: Notebook) -> Notebook {
         var notebook = notebook
+        notebook.title = notebook.title.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        if notebook.title.isEmpty { notebook.title = "Untitled notebook" }
+        notebook.studioItems.removeAll { $0.status == .cancelled && $0.markdown.isEmpty && $0.payload == nil }
         for chatIndex in notebook.chats.indices {
             for turnIndex in notebook.chats[chatIndex].turns.indices {
                 settle(&notebook.chats[chatIndex].turns[turnIndex].assistant)

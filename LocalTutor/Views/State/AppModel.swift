@@ -75,6 +75,9 @@ final class AppModel {
         if defaults.bool(forKey: "LocalTutorDebugSeedSample"), store.notebooks.isEmpty {
             SampleNotebook.install(into: self)
         }
+        if store.selectedNotebookID == nil, defaults.string(forKey: "LocalTutorDebugAsk") != nil || defaults.string(forKey: "LocalTutorDebugStudio") != nil {
+            store.selectedNotebookID = store.notebooks.first?.id
+        }
         if let question = defaults.string(forKey: "LocalTutorDebugAsk"), let notebookID = store.selectedNotebookID {
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(3))
@@ -109,6 +112,22 @@ final class AppModel {
 
     func createNotebook() {
         store.createNotebook()
+    }
+
+    func openNotebook(_ id: UUID) {
+        store.selectedNotebookID = id
+    }
+
+    func showHome() {
+        presentedCitation = nil
+        openedStudioItemID = nil
+        isShowingFlashcardReview = false
+        store.selectedNotebookID = nil
+    }
+
+    func isGenerating(in notebook: Notebook) -> Bool {
+        chat.running?.notebookID == notebook.id
+            || notebook.studioItems.contains { studio.isRunning($0.id) }
     }
 
     func importSources(_ urls: [URL]) {

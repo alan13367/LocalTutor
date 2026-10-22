@@ -29,17 +29,12 @@ struct ChatPanel: View {
                 .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                ChatThreadMenu(notebook: notebook, current: chat)
-            }
-        }
     }
 }
 
 // MARK: - Thread menu
 
-private struct ChatThreadMenu: View {
+struct ChatThreadMenu: View {
     @Environment(AppModel.self) private var app
     let notebook: Notebook
     let current: NotebookChat?

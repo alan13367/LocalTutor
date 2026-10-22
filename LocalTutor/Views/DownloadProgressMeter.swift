@@ -22,7 +22,7 @@ struct DownloadProgressMeter: View {
                     .fill(.secondary.opacity(0.18))
 
                 Capsule()
-                    .fill(Color.accentColor)
+                    .fill(.tint)
                     .frame(width: fillWidth)
                     .offset(x: indeterminateOffset(width: width, fillWidth: fillWidth))
             }

@@ -13,16 +13,17 @@ struct InferenceProfileTests {
     func catalogLoadsFromBundledJSONInTierOrder() {
         let ids = ModelProfile.studyCatalog.map(\.id)
 
-        #expect(ids == ["gemma4E2B", "qwen35_4B", "gemma4E4B", "qwen35_9B", "lfm25A1B8B", "gemma4_12B", "gemma4_26B_A4B"])
+        #expect(ids == ["gemma4E2B", "qwen35_4B", "gemma4E4B", "qwen35_9B", "qwythos9B", "lfm25A1B8B", "gemma4_12B", "gemma4_26B_A4B"])
         #expect(ModelProfile.studyCatalog.map(\.tier) == ModelProfile.studyCatalog.map(\.tier).sorted())
         #expect(ModelProfile.studyCatalog.allSatisfy { $0.downloadBytes > 0 && $0.kvBytesPerToken > 0 })
     }
 
     @Test
     func catalogUsesStandardQuantizationsOnly() {
+        let vettedThirdPartyRepositories: Set<String> = ["ahmedandaloes/Qwythos-9B-v2-MLX-4bit"]
         for profile in ModelProfile.studyCatalog {
             #expect(!profile.modelIdentifier.localizedCaseInsensitiveContains("optiq"))
-            #expect(profile.modelIdentifier.hasPrefix("mlx-community/"))
+            #expect(profile.modelIdentifier.hasPrefix("mlx-community/") || vettedThirdPartyRepositories.contains(profile.modelIdentifier))
         }
     }
 

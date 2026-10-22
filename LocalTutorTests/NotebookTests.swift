@@ -151,6 +151,21 @@ struct NotebookTests {
     }
 
     @Test
+    func sanitizeTidiesTitlesAndDropsEmptyCancelledItems() {
+        var kept = StudioItem(kind: .summary, status: .cancelled)
+        kept.markdown = "Partial summary"
+        let notebook = Notebook(
+            title: "Material  de   estudio ",
+            studioItems: [StudioItem(kind: .beginnerExplanation, status: .cancelled), kept, StudioItem(kind: .quiz, status: .done)]
+        )
+
+        let sanitized = NotebookPersistence.sanitize(notebook)
+
+        #expect(sanitized.title == "Material de estudio")
+        #expect(sanitized.studioItems.map(\.kind) == [.summary, .quiz])
+    }
+
+    @Test
     func citationRangesBecomeSingleLinks() {
         let text = "Gas exchange [2–4]. Cells [5-6; 1]. Out of range [3–9]."
         let linked = CitationLinker.linkify(text, validRange: 1...6)

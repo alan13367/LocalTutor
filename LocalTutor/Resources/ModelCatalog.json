@@ -96,6 +96,28 @@
       "disableThinking": true
     },
     {
+      "id": "qwythos9B",
+      "name": "Qwythos 9B",
+      "subtitle": "Text-only Qwen3.5 9B finetune for security topics",
+      "repository": "ahmedandaloes/Qwythos-9B-v2-MLX-4bit",
+      "loader": "llm",
+      "kind": "text",
+      "tier": "sixteenGB",
+      "publisher": "Empero AI",
+      "summary": "Qwen3.5 9B finetuned for cybersecurity. Strong on networking, security and systems coursework over readable source text.",
+      "parameterScale": "≈ 9B params · 4-bit MLX",
+      "strengths": [
+        "Text-only",
+        "Cybersecurity",
+        "Long context"
+      ],
+      "recommended": false,
+      "downloadBytes": 5060000000,
+      "kvBytesPerToken": 32768,
+      "maxContextTokens": 262144,
+      "disableThinking": true
+    },
+    {
       "id": "lfm25A1B8B",
       "name": "LFM2.5 8B-A1B",
       "subtitle": "Very fast text-only mixture of experts",
