@@ -83,46 +83,69 @@ private struct ChatTranscript: View {
     let notebook: Notebook
     let chat: NotebookChat
 
+    @State private var position = ScrollPosition(edge: .bottom)
+    @State private var isAtBottom = true
+
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 26) {
-                    ForEach(chat.turns) { turn in
-                        ChatTurnView(
-                            turn: turn,
-                            live: app.chat.liveGeneration(for: turn.id),
-                            notebookID: notebook.id
-                        )
-                        .id(turn.id)
-                    }
-                    if let suggestions = refinementSuggestions {
-                        RefinementChips(suggestions: suggestions) { suggestion in
-                            app.handleRefinement(suggestion, lastQuestion: chat.turns.last?.user.focus)
-                        }
-                    }
-                    Color.clear.frame(height: 4).id("bottom")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 26) {
+                ForEach(chat.turns) { turn in
+                    ChatTurnView(
+                        turn: turn,
+                        live: app.chat.liveGeneration(for: turn.id),
+                        notebookID: notebook.id
+                    )
+                    .id(turn.id)
                 }
-                .padding(.horizontal, 28)
-                .padding(.vertical, 24)
-                .frame(maxWidth: 860, alignment: .leading)
-                .frame(maxWidth: .infinity)
-            }
-            .scrollEdgeEffectStyle(.soft, for: .bottom)
-            .onChange(of: chat.turns.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
+                if let suggestions = refinementSuggestions {
+                    RefinementChips(suggestions: suggestions) { suggestion in
+                        app.handleRefinement(suggestion, lastQuestion: chat.turns.last?.user.focus)
+                    }
                 }
             }
-            .onChange(of: app.chat.live?.markdown.count) { _, _ in
-                proxy.scrollTo("bottom", anchor: .bottom)
-            }
-            .onAppear {
-                proxy.scrollTo("bottom", anchor: .bottom)
-            }
-            .onChange(of: chat.id) { _, _ in
-                proxy.scrollTo("bottom", anchor: .bottom)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 24)
+            .frame(maxWidth: 860, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .scrollPosition($position)
+        .defaultScrollAnchor(.bottom)
+        .scrollEdgeEffectStyle(.soft, for: .bottom)
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 60
+        } action: { _, atBottom in
+            isAtBottom = atBottom
+        }
+        .onChange(of: chat.turns.count) { _, _ in
+            withAnimation(.easeOut(duration: 0.2)) {
+                position.scrollTo(edge: .bottom)
             }
         }
+        .onChange(of: app.chat.live?.markdown.count) { _, _ in
+            if isAtBottom {
+                position.scrollTo(edge: .bottom)
+            }
+        }
+        .onChange(of: chat.id) { _, _ in
+            position.scrollTo(edge: .bottom)
+        }
+        .overlay(alignment: .bottom) {
+            if !isAtBottom {
+                Button {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        position.scrollTo(edge: .bottom)
+                    }
+                } label: {
+                    Label("Jump to latest", systemImage: "arrow.down")
+                        .font(.callout.weight(.medium))
+                        .padding(.horizontal, 4)
+                }
+                .buttonStyle(.glass)
+                .padding(.bottom, 10)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: isAtBottom)
     }
 
     private var refinementSuggestions: [RefinementSuggestion]? {
@@ -157,8 +180,9 @@ struct ChatTurnView: View {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(Color.accentColor.opacity(0.16))
                 )
-                .accessibilityLabel("You asked: \(turn.user.displayPrompt)")
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("You asked: \(turn.user.displayPrompt)")
     }
 
     private var markdown: String { live?.markdown ?? turn.assistant.markdown }
@@ -273,15 +297,14 @@ struct StreamingStatusView: View {
         HStack(spacing: 10) {
             ProgressView()
                 .controlSize(.small)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(message)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 if let fraction {
-                    ProgressView(value: fraction)
+                    DownloadProgressMeter(fraction: fraction, label: "Reading sources")
                         .frame(maxWidth: 220)
-                        .accessibilityLabel("Reading sources")
-                        .accessibilityValue("\(Int(fraction * 100)) percent")
                 }
             }
         }

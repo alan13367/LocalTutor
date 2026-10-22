@@ -25,7 +25,7 @@ struct ContentView: View {
                 .padding(.horizontal, 24)
         }
         .overlay(alignment: .bottomTrailing) {
-            if let status = app.models.downloadStatus, app.hasCompletedOnboarding {
+            if let status = app.models.downloadStatus, app.hasCompletedOnboarding, status.phase != .loading, status.phase != .checking {
                 ModelDownloadToast(status: status) {
                     app.models.dismissDownloadStatus()
                 }
@@ -33,7 +33,7 @@ struct ContentView: View {
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .animation(.easeOut(duration: 0.2), value: app.models.downloadStatus != nil)
+        .animation(.easeOut(duration: 0.2), value: app.models.downloadStatus?.phase)
         .animation(.easeOut(duration: 0.2), value: app.globalError)
     }
 }

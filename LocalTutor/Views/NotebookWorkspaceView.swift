@@ -249,10 +249,12 @@ private struct NotebookRow: View {
             if isGenerating {
                 ProgressView()
                     .controlSize(.small)
-                    .accessibilityLabel("Generating")
+                    .accessibilityHidden(true)
             }
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(isGenerating ? "Generating" : "")
     }
 }
 
@@ -288,6 +290,15 @@ private struct ModelFooterButton: View {
 
     private var statusLine: String {
         guard let profile = app.models.selectedProfile else { return "Open Settings to pick one" }
+        if let status = app.models.downloadStatus, status.profileID == profile.id {
+            switch status.phase {
+            case .checking, .loading: return "Loading…"
+            case .downloading: return "Downloading · \(status.fraction.map { DownloadProgressUpdate.percentText(for: $0) } ?? "…")"
+            case .paused: return "Download paused"
+            case .failed: return "Couldn’t load · open Settings"
+            case .ready: break
+            }
+        }
         if app.models.loadedProfileID == profile.id {
             return "Loaded · \(contextLabel)"
         }

@@ -8,6 +8,7 @@ import SwiftUI
 
 struct DownloadProgressMeter: View {
     var fraction: Double?
+    var label: LocalizedStringKey = "Download progress"
 
     @State private var animateIndeterminate = false
 
@@ -28,7 +29,8 @@ struct DownloadProgressMeter: View {
         }
         .frame(height: 6)
         .clipShape(Capsule())
-        .accessibilityLabel("Download progress")
+        .accessibilityElement()
+        .accessibilityLabel(label)
         .accessibilityValue(accessibilityValue)
         .onAppear {
             animateIndeterminate = fraction == nil

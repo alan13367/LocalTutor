@@ -439,6 +439,11 @@ final class ModelManager {
 
     private func markReady(_ profile: ModelProfile) {
         guard downloadStatus?.profileID == profile.id || preloadProfileID == profile.id else { return }
+        if let phase = downloadStatus?.phase, phase == .checking || phase == .loading {
+            dismissDownloadStatus()
+            refreshCacheInfo(force: true)
+            return
+        }
         downloadStatus = ModelDownloadStatus(
             profileID: profile.id,
             profileName: profile.name,

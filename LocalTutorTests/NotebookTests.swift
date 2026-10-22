@@ -142,12 +142,23 @@ struct NotebookTests {
         let linked = CitationLinker.linkify(text, validRange: 1...3)
 
         #expect(linked.contains("[1](cite:1)"))
-        #expect(linked.contains("[2](cite:2)[3](cite:3)"))
+        #expect(linked.contains("[2](cite:2)\u{2009}[3](cite:3)"))
         #expect(linked.contains("[9]"))
         #expect(!linked.contains("cite:9"))
         #expect(linked.contains("[a](https://x.y)"))
         #expect(CitationLinker.referencedIndexes(in: text) == [1, 2, 3, 9])
         #expect(CitationLinker.citationIndex(from: URL(string: "cite:12")!) == 12)
+    }
+
+    @Test
+    func citationRangesBecomeSingleLinks() {
+        let text = "Gas exchange [2–4]. Cells [5-6; 1]. Out of range [3–9]."
+        let linked = CitationLinker.linkify(text, validRange: 1...6)
+
+        #expect(linked.contains("[2–4](cite:2)"))
+        #expect(linked.contains("[5–6](cite:5)\u{2009}[1](cite:1)"))
+        #expect(linked.contains("[3–9]."))
+        #expect(CitationLinker.referencedIndexes(in: "[2–4] [1]") == [2, 3, 4, 1])
     }
 
     @Test
@@ -263,6 +274,7 @@ struct NotebookTests {
     func sourceTitlesComeFromFilenames() {
         #expect(SourceLibrary.title(fromFilename: "intro_to-economics.pdf") == "intro to economics")
         #expect(SourceLibrary.title(fromFilename: ".pdf") == "Untitled notebook")
+        #expect(SourceLibrary.title(fromFilename: "Material - Examen  Final.pdf") == "Material – Examen Final")
     }
 
     @Test

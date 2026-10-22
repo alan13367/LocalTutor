@@ -10,7 +10,7 @@ enum CitationLinker {
     static let scheme = "cite"
 
     private static let markerRegex = try? NSRegularExpression(
-        pattern: #"\[(\d{1,3}(?:\s*[,;]\s*\d{1,3})*)\](?!\()"#
+        pattern: #"\[(\d{1,3}(?:\s*[-–—]\s*\d{1,3})?(?:\s*[,;]\s*\d{1,3}(?:\s*[-–—]\s*\d{1,3})?)*)\](?!\()"#
     )
 
     static func linkify(_ markdown: String, validRange: ClosedRange<Int>?) -> String {
@@ -23,12 +23,13 @@ enum CitationLinker {
         for match in matches {
             guard let whole = Range(match.range, in: markdown),
                   let body = Range(match.range(at: 1), in: markdown) else { continue }
-            let numbers = markdown[body]
-                .split(whereSeparator: { $0 == "," || $0 == ";" })
-                .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-            guard !numbers.isEmpty, numbers.allSatisfy(validRange.contains) else { continue }
+            let groups = parseGroups(markdown[body])
+            guard !groups.isEmpty, groups.allSatisfy({ validRange.contains($0.lowerBound) && validRange.contains($0.upperBound) }) else { continue }
             result += markdown[cursor..<whole.lowerBound]
-            result += numbers.map { "[\($0)](\(scheme):\($0))" }.joined()
+            result += groups.map { group in
+                let label = group.count == 1 ? "\(group.lowerBound)" : "\(group.lowerBound)–\(group.upperBound)"
+                return "[\(label)](\(scheme):\(group.lowerBound))"
+            }.joined(separator: "\u{2009}")
             cursor = whole.upperBound
         }
         result += markdown[cursor...]
@@ -45,13 +46,25 @@ enum CitationLinker {
         var seen: [Int] = []
         for match in regex.matches(in: markdown, range: NSRange(markdown.startIndex..., in: markdown)) {
             guard let body = Range(match.range(at: 1), in: markdown) else { continue }
-            for value in markdown[body].split(whereSeparator: { $0 == "," || $0 == ";" }) {
-                if let index = Int(value.trimmingCharacters(in: .whitespaces)), !seen.contains(index) {
+            for group in parseGroups(markdown[body]) {
+                for index in group where !seen.contains(index) {
                     seen.append(index)
                 }
             }
         }
         return seen
+    }
+
+    private static func parseGroups(_ body: Substring) -> [ClosedRange<Int>] {
+        body.split(whereSeparator: { $0 == "," || $0 == ";" }).compactMap { part in
+            let bounds = part.split(whereSeparator: { $0 == "-" || $0 == "–" || $0 == "—" })
+                .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            switch bounds.count {
+            case 1: return bounds[0]...bounds[0]
+            case 2 where bounds[0] <= bounds[1] && bounds[1] - bounds[0] <= 50: return bounds[0]...bounds[1]
+            default: return nil
+            }
+        }
     }
 
     static func styled(_ attributed: AttributedString) -> AttributedString {

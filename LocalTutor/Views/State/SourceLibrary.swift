@@ -140,8 +140,10 @@ final class SourceLibrary {
     nonisolated static func title(fromFilename name: String) -> String {
         let base = (name as NSString).deletingPathExtension
             .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: " - ", with: " – ")
             .replacingOccurrences(of: "-", with: " ")
-            .trimmingCharacters(in: .whitespaces)
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
         guard !base.isEmpty, !base.hasPrefix(".") else { return "Untitled notebook" }
         return String(base.prefix(60))
     }

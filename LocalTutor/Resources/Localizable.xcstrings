@@ -137,9 +137,6 @@
         }
       }
     },
-    "%lld percent" : {
-
-    },
     "%lld." : {
 
     },
@@ -361,9 +358,6 @@
 
     },
     "Edit" : {
-
-    },
-    "Embedding Gemma 300M" : {
 
     },
     "Everything (models, sources, notebooks) stays on this Mac. No accounts, no telemetry." : {

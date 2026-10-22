@@ -99,6 +99,7 @@ struct CitationSourceView: View {
                             .frame(width: 4)
                     }
                     .textSelection(.enabled)
+                    .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Cited passage: \(context?.passage ?? citation.excerpt)")
                 if let after = context?.after, !after.isEmpty {
                     Text(after)

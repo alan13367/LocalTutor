@@ -14,6 +14,7 @@ struct QuizPlayerView: View {
     @State private var selectedAnswers: [String: String] = [:]
     @State private var revealed: Set<String> = []
     @State private var shortAnswerDrafts: [String: String] = [:]
+    @State private var selfGrades: [String: Bool] = [:]
     @State private var showResults = false
 
     private var question: QuizQuestion? {
@@ -148,6 +149,8 @@ struct QuizPlayerView: View {
         }
         .buttonStyle(.plain)
         .disabled(isRevealed)
+        .keyboardShortcut(KeyEquivalent(Character(letter(for: index).lowercased())), modifiers: [])
+        .accessibilityHint("Press \(letter(for: index))")
     }
 
     @ViewBuilder
@@ -198,6 +201,23 @@ struct QuizPlayerView: View {
                         .font(.callout.weight(.medium))
                 }
                 .foregroundStyle(.primary)
+                if !matches(shortAnswerDrafts[question.id] ?? "", question.correctAnswer) {
+                    HStack(spacing: 8) {
+                        Text("How did you do?")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Button("I got it", systemImage: "checkmark") {
+                            selfGrades[question.id] = true
+                        }
+                        .tint(selfGrades[question.id] == true ? .green : nil)
+                        Button("Not quite", systemImage: "xmark") {
+                            selfGrades[question.id] = false
+                        }
+                        .tint(selfGrades[question.id] == false ? .red : nil)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
             }
         }
     }
@@ -241,6 +261,7 @@ struct QuizPlayerView: View {
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
             } else {
                 Button {
                     submit(question: question)
@@ -249,6 +270,7 @@ struct QuizPlayerView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canSubmit(question: question))
+                .keyboardShortcut(.defaultAction)
             }
         }
     }
@@ -296,7 +318,7 @@ struct QuizPlayerView: View {
                         .foregroundStyle(Color.accentColor)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Nice work")
+                    Text(resultHeadline(percent: percent))
                         .font(.title3.weight(.semibold))
                     Text("\(correct) of \(total) correct")
                         .font(.callout)
@@ -335,6 +357,7 @@ struct QuizPlayerView: View {
         selectedAnswers.removeAll()
         revealed.removeAll()
         shortAnswerDrafts.removeAll()
+        selfGrades.removeAll()
         showResults = false
         currentIndex = 0
     }
@@ -348,7 +371,16 @@ struct QuizPlayerView: View {
             return matches(answer, question.correctAnswer)
         case .shortAnswer:
             let draft = shortAnswerDrafts[question.id] ?? ""
-            return matches(draft, question.correctAnswer)
+            return selfGrades[question.id] ?? matches(draft, question.correctAnswer)
+        }
+    }
+
+    private func resultHeadline(percent: Int) -> String {
+        switch percent {
+        case 90...: "Excellent work"
+        case 70..<90: "Nice work"
+        case 40..<70: "Getting there"
+        default: "Keep practicing"
         }
     }
 

@@ -47,7 +47,10 @@ struct OnboardingView: View {
             .ignoresSafeArea()
         )
         .onChange(of: app.models.downloadStatus == nil) { _, cleared in
-            if cleared, !app.models.cacheInfo(for: chosen).isCached {
+            guard cleared else { return }
+            if startedDownload, app.models.loadedProfileID == chosen.id {
+                finish(withSample: false)
+            } else if !app.models.cacheInfo(for: chosen).isCached {
                 startedDownload = false
             }
         }

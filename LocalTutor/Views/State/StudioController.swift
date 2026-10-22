@@ -240,6 +240,13 @@ final class StudioController {
     private func finish(itemID: UUID, notebookID: UUID, status: StudyTurnStatus, message: String) {
         let liveGeneration = live[itemID]
         liveGeneration?.drain()
+        let existing = store.notebook(notebookID)?.studioItems.first { $0.id == itemID }
+        if status == .cancelled, (liveGeneration?.markdown ?? existing?.markdown ?? "").isEmpty {
+            store.deleteStudioItem(itemID, in: notebookID)
+            live[itemID] = nil
+            tasks[itemID] = nil
+            return
+        }
         store.updateStudioItem(itemID, in: notebookID) { item in
             item.markdown = liveGeneration?.markdown ?? item.markdown
             item.reasoning = liveGeneration?.reasoning ?? item.reasoning

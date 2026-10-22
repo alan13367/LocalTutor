@@ -28,6 +28,9 @@ struct StudioItemDetailView: View {
             }
         }
         .frame(minWidth: 760, idealWidth: 860, minHeight: 600, idealHeight: 760)
+        .onChange(of: app.store.notebook(notebookID)?.studioItems.contains { $0.id == itemID }) { _, exists in
+            if exists != true { dismiss() }
+        }
     }
 
     private func header(_ item: StudioItem) -> some View {

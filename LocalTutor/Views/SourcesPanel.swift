@@ -73,7 +73,8 @@ struct SourcesPanel: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("Notebook name", text: $titleDraft)
+            TextField("Notebook name", text: $titleDraft, axis: .vertical)
+                .lineLimit(1...2)
                 .textFieldStyle(.plain)
                 .font(.title3.weight(.semibold))
                 .focused($isEditingTitle)
@@ -151,11 +152,10 @@ private struct SourceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Toggle("", isOn: Binding(get: { source.isEnabled }, set: { onToggleEnabled($0) }))
+                Toggle("Use \(source.displayName) in answers", isOn: Binding(get: { source.isEnabled }, set: { onToggleEnabled($0) }))
                     .toggleStyle(.checkbox)
                     .labelsHidden()
                     .disabled(!canUseSource)
-                    .accessibilityLabel("Use \(source.displayName) in answers")
 
                 Image(systemName: source.kind.systemImage)
                     .foregroundStyle(.secondary)
@@ -166,6 +166,7 @@ private struct SourceRow: View {
                     Text(source.displayName)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .help(source.displayName)
                     statusText
                 }
 

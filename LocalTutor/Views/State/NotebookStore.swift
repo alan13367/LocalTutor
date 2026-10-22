@@ -206,16 +206,18 @@ final class NotebookStore {
 
     func flush() async {
         saveTask?.cancel()
+        saveTask = nil
         await persistDirty()
     }
 
     private func markDirty(_ id: UUID) {
         guard persistence != nil else { return }
         dirtyIDs.insert(id)
-        saveTask?.cancel()
+        guard saveTask == nil else { return }
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: Self.saveDelay)
             guard !Task.isCancelled else { return }
+            self?.saveTask = nil
             await self?.persistDirty()
         }
     }

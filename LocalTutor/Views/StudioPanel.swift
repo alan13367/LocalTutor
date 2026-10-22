@@ -248,7 +248,7 @@ private struct StudioItemRow: View {
             .font(.caption2)
             .foregroundStyle(.secondary)
         } else if case .failed = item.status {
-            Text("Failed · tap for details")
+            Text("Failed · click for details")
                 .font(.caption2)
                 .foregroundStyle(.orange)
         } else {
@@ -326,9 +326,16 @@ struct NoteEditorView: View {
             markdown = note.markdown
             isPreviewing = !note.markdown.isEmpty
         }
+        .onDisappear(perform: save)
     }
 
     private func save() {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
+        if markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, trimmedTitle.isEmpty || trimmedTitle == "New note" {
+            app.store.deleteNote(note.id, in: notebookID)
+            return
+        }
+        guard title != note.title || markdown != note.markdown else { return }
         app.store.updateNote(note.id, in: notebookID) { stored in
             stored.title = title.isEmpty ? "Untitled note" : title
             stored.markdown = markdown
