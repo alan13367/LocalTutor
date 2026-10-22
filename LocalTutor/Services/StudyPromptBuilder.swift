@@ -5,11 +5,14 @@
 
 import CoreImage
 import Foundation
+import NaturalLanguage
 
 enum StudyPromptBuilder {
     static let systemInstruction = """
-    You are LocalTutor, a private local study tutor running on the student's Mac. If this model emits a <think> block or a thought/analysis channel marker, keep internal thinking there, close or leave that channel, then always write the final student-facing answer after it. Never stop after hidden thinking, and do not mix hidden reasoning into the final answer. Use plain Markdown for study content. Do not wrap ordinary words, filenames, acronyms, checklist boxes, or citations in LaTeX/math delimiters. Use Unicode symbols such as ☐ instead of $\\square$; reserve LaTeX only for real equations.
+    You are LocalTutor, a private study tutor running entirely on the student's Mac. Teach clearly and accurately, grounded in the student's own sources. If this model emits a <think> block or a thought/analysis channel marker, keep internal thinking there, close it, then always write the final student-facing answer after it. Never stop after hidden thinking, and do not mix hidden reasoning into the final answer. Use plain Markdown for study content. Do not wrap ordinary words, filenames, acronyms, checklist boxes, or citations in LaTeX/math delimiters. Use Unicode symbols such as ☐ instead of $\\square$; reserve LaTeX only for real equations.
     """
+
+    static let citationInstruction = "Source excerpts are numbered like [1], [2]. After each sentence or bullet that uses a source, cite the excerpt numbers in square brackets, e.g. [3] or [2][5]. Only cite numbers that appear in the excerpts. Do not add a separate references list."
 
     static func content(
         for user: StudyTurnUser,
@@ -96,6 +99,17 @@ enum StudyPromptBuilder {
             }
             closingParts.append(omittedNote)
         }
+        if user.resourceKind.producesMarkdown, !sourceContext.citations.isEmpty {
+            closingParts.append(citationInstruction)
+        }
+        let sourceText = sourceContext.blocks.compactMap { block -> String? in
+            guard case .text(let text) = block else { return nil }
+            return text
+        }
+        closingParts.append(ResponseLanguage.instruction(for: ResponseLanguage.resolve(
+            question: trimmed.isEmpty ? nil : trimmed,
+            sourceText: ResponseLanguage.sourceSample(sourceText)
+        )))
         closingParts.append(formatBlock)
 
         return StudyPromptContent(
@@ -106,7 +120,8 @@ enum StudyPromptBuilder {
             includedImageCount: sourceContext.includedImageCount,
             omittedImageCount: sourceContext.omittedImageCount,
             imageFilenames: sourceContext.imageFilenames,
-            warnings: sourceContext.warnings
+            warnings: sourceContext.warnings,
+            citations: sourceContext.citations
         )
     }
 
@@ -224,7 +239,8 @@ enum StudyPromptBuilder {
             includedImageCount: includedImages,
             omittedImageCount: omittedImages,
             imageFilenames: uniqueImageNames(in: render.blocks),
-            omittedTextChunkCount: 0
+            omittedTextChunkCount: 0,
+            citations: []
         )
     }
 

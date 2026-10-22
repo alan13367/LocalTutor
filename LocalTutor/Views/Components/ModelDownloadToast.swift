@@ -26,7 +26,7 @@ struct ModelDownloadToast: View {
                         .font(.callout.weight(.semibold))
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                    if status.phase == .ready || status.phase == .failed {
+                    if status.phase == .ready || status.phase == .failed || status.phase == .paused {
                         Button(action: onDismiss) {
                             Image(systemName: "xmark")
                                 .font(.system(size: 11, weight: .bold))
@@ -52,6 +52,8 @@ struct ModelDownloadToast: View {
                             .frame(width: 44, alignment: .trailing)
                     }
                 }
+
+                DownloadControls(status: status)
             }
         }
         .padding(12)
@@ -73,6 +75,8 @@ struct ModelDownloadToast: View {
             "cpu"
         case .downloading:
             "arrow.down.circle.fill"
+        case .paused:
+            "pause.circle.fill"
         case .ready:
             "checkmark.circle.fill"
         case .failed:
@@ -100,5 +104,39 @@ struct ModelDownloadToast: View {
             return "..."
         }
         return DownloadProgressUpdate.percentText(for: fraction)
+    }
+}
+
+struct DownloadControls: View {
+    @Environment(AppModel.self) private var app
+    let status: ModelDownloadStatus
+
+    var body: some View {
+        HStack(spacing: 8) {
+            switch status.phase {
+            case .checking, .downloading:
+                Button("Pause", systemImage: "pause.fill") {
+                    app.models.pauseDownload()
+                }
+                .disabled(!app.models.isDownloadActive)
+                cancelButton
+            case .paused, .failed:
+                Button("Resume", systemImage: "arrow.down.circle") {
+                    app.models.resumeDownload()
+                }
+                cancelButton
+            case .loading, .ready:
+                EmptyView()
+            }
+        }
+        .controlSize(.small)
+        .buttonStyle(.glass)
+    }
+
+    private var cancelButton: some View {
+        Button("Cancel", systemImage: "xmark", role: .destructive) {
+            app.models.cancelDownload()
+        }
+        .help("Stop and delete the partial download")
     }
 }

@@ -6,265 +6,240 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @ObservedObject var viewModel: StudyWorkspaceViewModel
-    @ObservedObject private var sourceIndexStatus = SourceIndexStatusModel.shared
-    @Environment(\.dismiss) private var dismiss
-    @State private var indexStatistics = SourceIndexStatistics(
-        documentCount: 0,
-        chunkCount: 0,
-        vectorCount: 0,
-        diskBytes: 0
-    )
-    @State private var embeddingProgress: Double?
-    @State private var embeddingStatus = "Installed automatically when semantic search is first needed."
-    @State private var isPreparingEmbedding = false
-    @State private var isClearingIndex = false
-
-    private var systemMemory: UInt64 {
-        SystemMemory.totalBytes()
+    var body: some View {
+        TabView {
+            Tab("Models", systemImage: "cpu") {
+                ModelsSettingsPane()
+            }
+            Tab("Helpers", systemImage: "sparkles") {
+                HelpersSettingsPane()
+            }
+            Tab("Storage", systemImage: "internaldrive") {
+                StorageSettingsPane()
+            }
+        }
+        .frame(width: 720, height: 620)
     }
+}
+
+// MARK: - Models
+
+private struct ModelsSettingsPane: View {
+    @Environment(AppModel.self) private var app
+    @State private var pendingRemoval: ModelProfile?
+
+    private var systemMemory: UInt64 { SystemMemory.totalBytes() }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    machineCard
-                    modelsSection
-                    indexingSection
-                    aboutSection
+        @Bindable var models = app.models
+        Form {
+            Section {
+                LabeledContent("This Mac") {
+                    Text("\(SystemInfo.chipName) · \(systemMemory.gibibytesDescription) · \(ModelTier.tier(forSystemMemory: systemMemory).label)")
+                        .foregroundStyle(.secondary)
                 }
-                .padding(24)
-                .frame(maxWidth: 760, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .center)
-            }
-            .background(Color(nsColor: .windowBackgroundColor))
-        }
-        .frame(minWidth: 720, idealWidth: 820, minHeight: 560, idealHeight: 700)
-        .onAppear {
-            viewModel.refreshModelCacheInfo()
-            refreshIndexStatistics()
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.16))
-                    .frame(width: 38, height: 38)
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Settings")
-                    .font(.title2.weight(.semibold))
-                Text("Choose your local tutor model")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Done") { dismiss() }
-                .keyboardShortcut(.defaultAction)
-                .controlSize(.large)
-        }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 16)
-    }
-
-    private var machineCard: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.primary.opacity(0.06))
-                    .frame(width: 44, height: 44)
-                Image(systemName: "laptopcomputer")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.primary)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text("This Mac")
-                    .font(.headline)
-                Text("\(systemMemory.gibibytesDescription) unified memory · \(SystemInfo.architecture)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            tierBadge
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.thinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
-        )
-    }
-
-    private var tierBadge: some View {
-        let tier = systemMemory >= 16.gibibytes ? "16 GB tier" : "8 GB tier"
-        return Text(tier)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(Color.accentColor.opacity(0.14)))
-            .foregroundStyle(Color.accentColor)
-    }
-
-    private var modelsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Models")
-                    .font(.title3.weight(.semibold))
-                Spacer()
-                Label("Text · MLX format", systemImage: "checkmark.seal.fill")
+                Picker("Context size", selection: $models.contextPreference) {
+                    ForEach(ContextPreference.allCases) { preference in
+                        Text(preference.title).tag(preference)
+                    }
+                }
+                .pickerStyle(.segmented)
+                if let policy = app.models.runtimePolicy {
+                    Text("\(app.models.contextPreference.detail) \(policy.profileName) reads up to \(policy.contextTokens.formatted()) tokens (about \((policy.sourceTokenBudget(for: .ask) * 3 / 4).formatted()) words of sources) per question.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Toggle("Faster generation (multi-token prediction)", isOn: $models.useSpeculativeDecoding)
+                Text(speculativeDetail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .labelStyle(.titleAndIcon)
             }
-            Text("LocalTutor ships Apple Silicon MLX models gated to your Mac's memory tier. Models focus on high-fidelity reasoning and processing of readable source text.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
 
-            VStack(spacing: 10) {
-                ForEach(ModelProfile.studyCatalog) { profile in
-                    ModelOptionRow(
-                        profile: profile,
-                        isSelected: profile.id == viewModel.selectedProfile?.id,
-                        canRun: MemoryPreflight.evaluate(profile: profile, systemMemoryBytes: systemMemory).canRun,
-                        cacheInfo: viewModel.cacheInfo(for: profile),
-                        isRemovingDownload: viewModel.isRemovingCachedModel(profile),
-                        canRemoveDownload: viewModel.canRemoveCachedModel(profile),
-                        downloadStatus: viewModel.modelDownloadStatus?.profileID == profile.id ? viewModel.modelDownloadStatus : nil,
-                        onSelect: {
-                            viewModel.setActiveProfile(profile)
-                        },
-                        onRemoveDownload: {
-                            viewModel.removeCachedModel(profile)
-                        },
-                        onDismissDownloadStatus: {
-                            viewModel.dismissModelDownloadStatus()
+            ForEach(ModelTier.allCases, id: \.self) { tier in
+                let profiles = ModelProfile.studyCatalog.filter { $0.tier == tier }
+                if !profiles.isEmpty {
+                    Section(tier.label) {
+                        ForEach(profiles) { profile in
+                            ModelRow(profile: profile, onRemove: { pendingRemoval = profile })
                         }
-                    )
+                    }
                 }
             }
         }
-    }
-
-    private var aboutSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("About")
-                .font(.title3.weight(.semibold))
-            HStack {
-                Label("LocalTutor", systemImage: "graduationcap.fill")
-                    .foregroundStyle(.primary)
-                Spacer()
-                Text(AppInfo.version)
-                    .foregroundStyle(.secondary)
-                    .font(.callout)
+        .formStyle(.grouped)
+        .confirmationDialog(
+            "Remove \(pendingRemoval?.name ?? "model")?",
+            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove Download", role: .destructive) {
+                if let pendingRemoval {
+                    app.models.remove(pendingRemoval)
+                }
+                pendingRemoval = nil
             }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.thinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
-            )
+        } message: {
+            Text("This frees \(pendingRemoval.map { app.models.cacheInfo(for: $0).sizeDescription } ?? "disk space"). You can download it again later.")
         }
+        .onAppear { app.models.refreshCacheInfo() }
     }
 
-    private var indexingSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Document Indexing")
-                .font(.title3.weight(.semibold))
-            Text("Attached sources use local full-text and semantic search. Documents never leave this Mac.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+    private var speculativeDetail: String {
+        guard let profile = app.models.selectedProfile else {
+            return "Downloads a small drafter model that predicts several tokens at once for long study materials."
+        }
+        guard profile.supportsSpeculativeDecoding else {
+            return "\(profile.name) has no multi-token prediction drafter yet."
+        }
+        let size = ByteCountFormatter.string(fromByteCount: Int64(profile.drafterBytes), countStyle: .file)
+        return "Adds a \(size) drafter to \(profile.name) that predicts several tokens at once, so answers and study materials stream noticeably faster."
+    }
+}
 
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 12) {
-                    Image(systemName: "text.magnifyingglass")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 30)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Embedding Gemma 300M")
+private struct ModelRow: View {
+    @Environment(AppModel.self) private var app
+    let profile: ModelProfile
+    var onRemove: () -> Void
+
+    var body: some View {
+        let canRun = MemoryPreflight.evaluate(profile: profile).canRun
+        let isSelected = app.models.selectedProfile?.id == profile.id
+        let isCached = app.models.cacheInfo(for: profile).isCached
+        let status = app.models.downloadStatus?.profileID == profile.id ? app.models.downloadStatus : nil
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(profile.name)
                             .font(.headline)
-                        Text(embeddingStatus)
+                        if profile.isRecommended {
+                            Text("Recommended")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.accentColor.opacity(0.16)))
+                                .foregroundStyle(.tint)
+                        }
+                        if profile.supportsVision {
+                            Image(systemName: "eye")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .help("Reads images and scanned pages")
+                                .accessibilityLabel("Vision capable")
+                        }
+                    }
+                    Text(profile.summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("\(profile.publisher) · \(profile.parameterScale) · \(profile.downloadSizeDescription)")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    if !canRun {
+                        Text("Needs \(profile.minimumSystemMemoryDescription)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if viewModel.cacheInfo(for: ModelCatalog.embeddingGemma300M).isCached {
-                        Button("Remove") {
-                            viewModel.removeCachedModel(ModelCatalog.embeddingGemma300M)
-                        }
-                        .disabled(!viewModel.canRemoveCachedModel(ModelCatalog.embeddingGemma300M))
+                    } else if isSelected {
+                        Text(isCached ? "In use" : "Selected")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tint)
                     } else {
-                        Button("Install") {
-                            prepareEmbeddingModel()
+                        Button(isCached ? "Use" : "Download") {
+                            app.models.select(profile)
                         }
-                        .disabled(isPreparingEmbedding)
+                        .buttonStyle(.glass)
+                        .disabled(app.isGenerating)
+                    }
+                    if isCached {
+                        Button("Remove…", role: .destructive, action: onRemove)
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                            .disabled(!app.models.canRemove(profile))
+                    } else if isSelected, canRun, status == nil {
+                        Button("Download") { app.models.startPreload(for: profile) }
+                            .buttonStyle(.glass)
                     }
                 }
+            }
+            if let status, status.phase != .ready {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(status.message)
+                        .font(.caption)
+                        .foregroundStyle(status.phase == .failed ? .orange : .secondary)
+                    if status.phase != .failed {
+                        DownloadProgressMeter(fraction: status.fraction)
+                            .frame(height: 6)
+                    }
+                    DownloadControls(status: status)
+                }
+                .padding(.leading, 34)
+            }
+        }
+        .padding(.vertical, 4)
+        .opacity(canRun ? 1 : 0.5)
+    }
+}
 
+// MARK: - Helpers
+
+private struct HelpersSettingsPane: View {
+    @AppStorage(AppStorageKeys.useSystemModelForHelpers) private var useSystemModel = true
+    @State private var embeddingStatus = "Installed automatically the first time semantic search is needed."
+    @State private var embeddingProgress: Double?
+    @State private var isPreparingEmbedding = false
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Use Apple Intelligence for quick tasks", isOn: $useSystemModel)
+                    .disabled(!SystemModelHelper.availability.isAvailable)
+                Text("Writes source guides and chat titles with Apple's built-in on-device model, so your tutor model stays free for answers.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                LabeledContent("Status") {
+                    Text(SystemModelHelper.availability.explanation)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Label("Apple Intelligence", systemImage: "apple.intelligence")
+            }
+
+            Section {
+                LabeledContent(ModelCatalog.embeddingModel.name) {
+                    if app.models.cacheInfo(for: ModelCatalog.embeddingModel).isCached {
+                        Text("Installed").foregroundStyle(.secondary)
+                    } else {
+                        Button("Install Now", action: prepareEmbeddingModel)
+                            .disabled(isPreparingEmbedding)
+                    }
+                }
+                Text(embeddingStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 if let embeddingProgress {
                     ProgressView(value: embeddingProgress)
                 }
-
-                Divider()
-
-                if let progress = sourceIndexStatus.latest {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(progress.message)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if let fraction = progress.fraction,
-                           progress.phase == .downloading || progress.phase == .embedding {
-                            ProgressView(value: fraction)
-                        }
-                    }
-                }
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Source index")
-                            .font(.headline)
-                        Text(
-                            "\(indexStatistics.documentCount) documents · \(indexStatistics.chunkCount) chunks · \(indexStatistics.vectorCount) vectors · \(ByteCountFormatter.localTutorMemoryString(fromByteCount: indexStatistics.diskBytes))"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Clear Index", role: .destructive) {
-                        clearIndex()
-                    }
-                    .disabled(isClearingIndex || indexStatistics.documentCount == 0)
-                }
+            } header: {
+                Label("Semantic search", systemImage: "text.magnifyingglass")
+            } footer: {
+                Text("Finds passages by meaning, not just keywords, for large notebooks. It loads only while indexing or searching and unloads when idle.")
             }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(.thinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
-            )
         }
+        .formStyle(.grouped)
     }
 
     private func prepareEmbeddingModel() {
         isPreparingEmbedding = true
-        embeddingStatus = "Preparing semantic search"
+        embeddingStatus = "Preparing semantic search…"
         Task {
             do {
                 try await SourceIndexCoordinator.shared.prepareEmbeddingModel { event in
@@ -274,303 +249,81 @@ struct SettingsView: View {
                             embeddingProgress = update.fraction
                             embeddingStatus = "Downloading semantic search model"
                         case .ready:
-                            embeddingProgress = 1
+                            embeddingProgress = nil
                             embeddingStatus = "Ready for semantic search"
                         }
                     }
                 }
-                await MainActor.run {
-                    isPreparingEmbedding = false
-                    viewModel.refreshModelCacheInfo(force: true)
-                }
+                isPreparingEmbedding = false
+                app.models.refreshCacheInfo(force: true)
             } catch {
-                await MainActor.run {
-                    isPreparingEmbedding = false
-                    embeddingProgress = nil
-                    embeddingStatus = error.localizedDescription
-                }
-            }
-        }
-    }
-
-    private func refreshIndexStatistics() {
-        Task {
-            let statistics = await SourceIndexCoordinator.shared.statistics()
-            await MainActor.run {
-                indexStatistics = statistics
-            }
-        }
-    }
-
-    private func clearIndex() {
-        isClearingIndex = true
-        Task {
-            try? await SourceIndexCoordinator.shared.clear()
-            let statistics = await SourceIndexCoordinator.shared.statistics()
-            await MainActor.run {
-                indexStatistics = statistics
-                isClearingIndex = false
+                isPreparingEmbedding = false
+                embeddingProgress = nil
+                embeddingStatus = error.localizedDescription
             }
         }
     }
 }
 
-private struct ModelOptionRow: View {
-    let profile: ModelProfile
-    let isSelected: Bool
-    let canRun: Bool
-    let cacheInfo: ModelCacheInfo
-    let isRemovingDownload: Bool
-    let canRemoveDownload: Bool
-    let downloadStatus: ModelDownloadStatus?
-    var onSelect: () -> Void
-    var onRemoveDownload: () -> Void
-    var onDismissDownloadStatus: () -> Void
+// MARK: - Storage
 
-    @State private var isShowingRemoveConfirmation = false
+private struct StorageSettingsPane: View {
+    @Environment(AppModel.self) private var app
+    @State private var statistics = SourceIndexStatistics(documentCount: 0, chunkCount: 0, vectorCount: 0, diskBytes: 0)
+    @State private var isClearing = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                Button(action: {
-                    guard canRun else { return }
-                    onSelect()
-                }) {
-                    HStack(alignment: .top, spacing: 14) {
-                        radio
-                        content
-                    }
-                    .contentShape(Rectangle())
+        Form {
+            Section("Source index") {
+                LabeledContent("Documents", value: statistics.documentCount.formatted())
+                LabeledContent("Passages", value: statistics.chunkCount.formatted())
+                LabeledContent("Vectors", value: statistics.vectorCount.formatted())
+                LabeledContent("Disk", value: ByteCountFormatter.localTutorMemoryString(fromByteCount: statistics.diskBytes))
+                Button("Clear Index", role: .destructive) {
+                    clearIndex()
                 }
-                .buttonStyle(.plain)
-                .disabled(!canRun)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .opacity(canRun ? 1.0 : 0.55)
-
-                cacheAction
-            }
-
-            if let status = downloadStatus {
-                progressSection(status: status)
-            }
-        }
-        .padding(16)
-        .background(background)
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(
-                    isSelected ? Color.accentColor : Color.primary.opacity(0.06),
-                    lineWidth: isSelected ? 1.4 : 0.5
-                )
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .help(canRun ? profile.summary : "Requires \(profile.minimumSystemMemoryDescription) of unified memory.")
-        .confirmationDialog(
-            "Remove \(profile.name)?",
-            isPresented: $isShowingRemoveConfirmation
-        ) {
-            Button("Remove Download", role: .destructive) {
-                onRemoveDownload()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This frees \(cacheInfo.sizeDescription). The model will download again the next time you use it.")
-        }
-        .animation(.easeOut(duration: 0.18), value: downloadStatus != nil)
-    }
-
-    @ViewBuilder
-    private func progressSection(status: ModelDownloadStatus) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Divider()
-                .padding(.bottom, 4)
-            
-            HStack(spacing: 8) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(progressIconColor(for: status.phase).opacity(0.15))
-                        .frame(width: 24, height: 24)
-                    Image(systemName: progressIconName(for: status.phase))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(progressIconColor(for: status.phase))
-                }
-                
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(status.message)
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                }
-                
-                Spacer()
-                
-                if status.phase == .ready || status.phase == .failed {
-                    Button(action: onDismissDownloadStatus) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.secondary)
-                            .padding(4)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Dismiss")
-                }
-            }
-            
-            if status.phase != .ready && status.phase != .failed {
-                HStack(spacing: 8) {
-                    DownloadProgressMeter(fraction: status.fraction)
-                    
-                    Text(progressLabel(for: status))
-                        .font(.caption2.monospacedDigit().weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 44, alignment: .trailing)
-                }
-            }
-        }
-    }
-
-    private func progressIconName(for phase: ModelDownloadPhase) -> String {
-        switch phase {
-        case .checking, .loading:
-            "cpu"
-        case .downloading:
-            "arrow.down.circle.fill"
-        case .ready:
-            "checkmark.circle.fill"
-        case .failed:
-            "exclamationmark.triangle.fill"
-        }
-    }
-
-    private func progressIconColor(for phase: ModelDownloadPhase) -> Color {
-        switch phase {
-        case .ready:
-            .green
-        case .failed:
-            .orange
-        default:
-            .accentColor
-        }
-    }
-
-    private func progressLabel(for status: ModelDownloadStatus) -> String {
-        guard let fraction = status.fraction else {
-            return "..."
-        }
-        return DownloadProgressUpdate.percentText(for: fraction)
-    }
-
-    private var background: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(isSelected ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.03))
-    }
-
-    private var radio: some View {
-        ZStack {
-            Circle()
-                .strokeBorder(isSelected ? Color.accentColor : Color.secondary.opacity(0.45), lineWidth: 1.5)
-                .frame(width: 20, height: 20)
-            if isSelected {
-                Circle()
-                    .fill(Color.accentColor)
-                    .frame(width: 10, height: 10)
-            }
-        }
-        .padding(.top, 2)
-    }
-
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text(profile.name)
-                    .font(.headline)
-                if profile.isRecommended {
-                    Text("Recommended")
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.green.opacity(0.18)))
-                        .foregroundStyle(.green)
-                }
-                if !canRun {
-                    Text("Needs \(profile.minimumSystemMemoryDescription)")
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.orange.opacity(0.18)))
-                        .foregroundStyle(.orange)
-                }
-                if cacheInfo.isCached {
-                    Text("Downloaded · \(cacheInfo.sizeDescription)")
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.primary.opacity(0.06)))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(profile.tierLabel)
-                    .font(.caption.weight(.medium))
+                .disabled(isClearing || statistics.documentCount == 0)
+                Text("Sources are re-indexed automatically the next time they are used.")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            Text(profile.summary)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 14) {
-                metaItem(icon: "building.2", text: profile.publisher)
-                metaItem(icon: "cpu", text: profile.parameterScale)
-                if ModelRuntimePolicyProvider.policy(for: profile).supportsVision {
-                    metaItem(icon: "eye", text: "Vision")
-                } else {
-                    metaItem(icon: "text.alignleft", text: "Text-only")
+            Section("Models") {
+                let cached = ModelProfile.studyCatalog.filter { app.models.cacheInfo(for: $0).isCached }
+                if cached.isEmpty {
+                    Text("No models downloaded.")
+                        .foregroundStyle(.secondary)
                 }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-            if !profile.strengths.isEmpty {
-                FlowLayout(spacing: 6) {
-                    ForEach(profile.strengths, id: \.self) { strength in
-                        Text(strength)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Color.primary.opacity(0.06)))
+                ForEach(cached) { profile in
+                    LabeledContent(profile.name, value: app.models.cacheInfo(for: profile).sizeDescription)
+                }
+                Button("Show Data Folder in Finder") {
+                    if let root = try? AppDirectories.applicationSupportRoot() {
+                        NSWorkspace.shared.activateFileViewerSelecting([root])
                     }
                 }
             }
-        }
-    }
-
-    private func metaItem(icon: String, text: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-            Text(text)
-        }
-    }
-
-    @ViewBuilder
-    private var cacheAction: some View {
-        if isRemovingDownload {
-            ProgressView()
-                .controlSize(.small)
-                .frame(width: 30, height: 30)
-                .help("Removing downloaded files")
-        } else if cacheInfo.isCached {
-            Button {
-                isShowingRemoveConfirmation = true
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 30, height: 30)
+            Section("About") {
+                LabeledContent("LocalTutor", value: AppInfo.version)
+                Text("Everything (models, sources, notebooks) stays on this Mac. No accounts, no telemetry.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(canRemoveDownload ? .secondary : .tertiary)
-            .disabled(!canRemoveDownload)
-            .help(canRemoveDownload ? "Remove downloaded model files" : "Stop the current response before removing model files")
+        }
+        .formStyle(.grouped)
+        .task { await refresh() }
+    }
+
+    private func refresh() async {
+        statistics = await SourceIndexCoordinator.shared.statistics()
+    }
+
+    private func clearIndex() {
+        isClearing = true
+        Task {
+            try? await SourceIndexCoordinator.shared.clear()
+            await SourceExtractionCache.shared.removeAll()
+            await refresh()
+            isClearing = false
         }
     }
 }

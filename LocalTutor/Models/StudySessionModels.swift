@@ -9,67 +9,71 @@ import UniformTypeIdentifiers
 
 enum StudyResourceKind: String, CaseIterable, Identifiable, Codable {
     case ask
+    case studyGuide
+    case briefing
     case summary
     case beginnerExplanation
     case flashcards
     case quiz
     case cheatSheet
+    case mindMap
+    case audioOverview
 
     var id: String { rawValue }
 
+    static var studioKinds: [StudyResourceKind] {
+        [.studyGuide, .briefing, .summary, .beginnerExplanation, .cheatSheet, .flashcards, .quiz, .mindMap, .audioOverview]
+    }
+
     var title: String {
         switch self {
-        case .ask:
-            "Ask"
-        case .summary:
-            "Summary"
-        case .beginnerExplanation:
-            "Explain"
-        case .flashcards:
-            "Flashcards"
-        case .quiz:
-            "Quiz"
-        case .cheatSheet:
-            "Cheat Sheet"
+        case .ask: "Ask"
+        case .studyGuide: "Study Guide"
+        case .briefing: "Briefing"
+        case .summary: "Summary"
+        case .beginnerExplanation: "Explainer"
+        case .flashcards: "Flashcards"
+        case .quiz: "Quiz"
+        case .cheatSheet: "Cheat Sheet"
+        case .mindMap: "Mind Map"
+        case .audioOverview: "Audio Overview"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .ask:
-            "questionmark.bubble"
-        case .summary:
-            "doc.text"
-        case .beginnerExplanation:
-            "lightbulb"
-        case .flashcards:
-            "rectangle.stack"
-        case .quiz:
-            "checklist"
-        case .cheatSheet:
-            "doc.plaintext"
+        case .ask: "questionmark.bubble"
+        case .studyGuide: "book.pages"
+        case .briefing: "doc.richtext"
+        case .summary: "doc.text"
+        case .beginnerExplanation: "lightbulb"
+        case .flashcards: "rectangle.stack"
+        case .quiz: "checklist"
+        case .cheatSheet: "doc.plaintext"
+        case .mindMap: "point.3.connected.trianglepath.dotted"
+        case .audioOverview: "waveform"
         }
     }
 
     var shortDescription: String {
         switch self {
         case .ask: "Source Q&A"
+        case .studyGuide: "Key terms, questions, essay prompts"
+        case .briefing: "Executive overview of every source"
         case .summary: "Main ideas, fast"
         case .beginnerExplanation: "Beginner walkthrough"
-        case .flashcards: "Interactive deck"
+        case .flashcards: "Spaced-repetition deck"
         case .quiz: "Interactive test"
-        case .cheatSheet: "Compact reference"
+        case .cheatSheet: "Compact exam reference"
+        case .mindMap: "Visual map of topics"
+        case .audioOverview: "Two-host spoken recap"
         }
     }
 
     var composerPlaceholder: String {
         switch self {
         case .ask: "Ask anything about your sources."
-        case .summary: "Anything specific to focus on? Or just press send for a full summary."
-        case .beginnerExplanation: "Add a topic to focus on, or send to explain the whole document."
-        case .flashcards: "Add a topic, or send to build flashcards from the sources."
-        case .quiz: "Add a topic, or send to generate a quiz from the sources."
-        case .cheatSheet: "Add a focus, or send for a complete cheat sheet."
+        default: "Optional: focus on a topic or chapter."
         }
     }
 
@@ -77,6 +81,10 @@ enum StudyResourceKind: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .ask:
             "Answer the student's question directly using the provided sources. Do not turn the answer into a beginner explanation unless the student asks for that."
+        case .studyGuide:
+            "Create a complete study guide with these sections: Overview (2-3 sentences), Key Concepts (each with a one-line definition), Short-Answer Practice Questions (8-10, with brief answers at the end), Essay Prompts (3-4), and a Glossary of important terms."
+        case .briefing:
+            "Write a briefing document: an executive summary paragraph, then the most important themes and findings as headed sections with supporting facts, notable quotes or figures, and a closing list of open questions."
         case .summary:
             "Create a structured study summary with the main ideas, supporting details, and a short review checklist."
         case .beginnerExplanation:
@@ -84,27 +92,28 @@ enum StudyResourceKind: String, CaseIterable, Identifiable, Codable {
         case .flashcards:
             "Create flashcards with clear fronts and concise backs. Prioritize facts, definitions, commands, formulas, and distinctions likely to be tested."
         case .quiz:
-            "Create a quiz with a mix of multiple choice and short-answer questions. Put the answer key after the questions."
+            "Create a quiz with a mix of multiple choice, true/false, and short-answer questions that test understanding, not trivia."
         case .cheatSheet:
             "Create a compact exam cheat sheet with formulas, commands, definitions, pitfalls, and high-yield reminders."
+        case .mindMap:
+            "Create a hierarchical mind map of the material: one central topic, 4-7 main branches, and 2-5 short sub-points per branch."
+        case .audioOverview:
+            "Write a lively, accurate two-host podcast conversation that teaches the material. Host A guides the discussion and asks questions; Host B explains with examples. Open with a hook, cover the key ideas in a logical order, and close with a quick recap."
         }
     }
 
     var composerActionTitle: String {
-        switch self {
-        case .ask:
-            "Ask"
-        default:
-            "Create"
-        }
+        self == .ask ? "Ask" : "Create"
     }
 
     var allowsEmptyFocus: Bool {
+        self != .ask
+    }
+
+    var producesMarkdown: Bool {
         switch self {
-        case .ask:
-            false
-        default:
-            true
+        case .flashcards, .quiz, .mindMap, .audioOverview: false
+        default: true
         }
     }
 }
@@ -165,6 +174,9 @@ struct StudySource: Identifiable, Equatable, Hashable, Codable {
     var kind: StudySourceKind
     /// Security-scoped bookmark so the file stays readable after the app relaunches.
     var bookmarkData: Data?
+    var isEnabled: Bool = true
+    var addedAt: Date = Date()
+    var guide: SourceGuide?
 
     var isImage: Bool {
         kind == .image
@@ -180,6 +192,23 @@ struct StudySource: Identifiable, Equatable, Hashable, Codable {
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, url, displayName, fileExtension, kind, bookmarkData, isEnabled, addedAt, guide
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        url = try container.decode(URL.self, forKey: .url)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? url.lastPathComponent
+        fileExtension = try container.decodeIfPresent(String.self, forKey: .fileExtension) ?? url.pathExtension.lowercased()
+        kind = (try? container.decode(StudySourceKind.self, forKey: .kind)) ?? StudySource.kind(for: url)
+        bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        addedAt = try container.decodeIfPresent(Date.self, forKey: .addedAt) ?? Date()
+        guide = try? container.decodeIfPresent(SourceGuide.self, forKey: .guide)
     }
 
     /// Resolves the bookmark to a current security-scoped URL when possible, so
@@ -211,12 +240,12 @@ struct StudySource: Identifiable, Equatable, Hashable, Codable {
         if supportsVision {
             types.append(.image)
         }
-        let extensions = ["doc", "docx", "pages", "ppt", "pptx", "key", "xls", "xlsx", "numbers", "md", "csv"]
+        let extensions = ["doc", "docx", "pages", "ppt", "pptx", "key", "xls", "xlsx", "numbers", "md", "csv", "epub", "webarchive", "html", "json", "xml"]
         types.append(contentsOf: extensions.compactMap { UTType(filenameExtension: $0) })
         return Array(Set(types))
     }
 
-    private static func kind(for url: URL) -> StudySourceKind {
+    static func kind(for url: URL) -> StudySourceKind {
         let ext = url.pathExtension.lowercased()
         guard let type = UTType(filenameExtension: ext) else {
             return .other
@@ -224,6 +253,10 @@ struct StudySource: Identifiable, Equatable, Hashable, Codable {
 
         if type.conforms(to: .image) {
             return .image
+        }
+
+        if ["html", "htm", "xhtml", "webarchive", "epub"].contains(ext) {
+            return .document
         }
 
         if type.conforms(to: .pdf) {
@@ -326,6 +359,8 @@ struct StudyTurnAssistant: Equatable, Codable {
     var downloadProgress: Double?
     var isDownloading: Bool = false
     var payload: StudyArtifactPayload?
+    var citations: [SourceCitation] = []
+    var profileName: String?
 
     private enum CodingKeys: String, CodingKey {
         case markdown
@@ -337,6 +372,8 @@ struct StudyTurnAssistant: Equatable, Codable {
         case downloadProgress
         case isDownloading
         case payload
+        case citations
+        case profileName
     }
 
     init() {}
@@ -352,6 +389,8 @@ struct StudyTurnAssistant: Equatable, Codable {
         downloadProgress = try? container.decode(Double.self, forKey: .downloadProgress)
         isDownloading = (try? container.decode(Bool.self, forKey: .isDownloading)) ?? false
         payload = try? container.decode(StudyArtifactPayload.self, forKey: .payload)
+        citations = (try? container.decode([SourceCitation].self, forKey: .citations)) ?? []
+        profileName = try? container.decode(String.self, forKey: .profileName)
     }
 }
 
@@ -463,28 +502,8 @@ struct RefinementSuggestion: Identifiable, Equatable {
                 RefinementSuggestion(label: "Make flashcards", systemImage: "rectangle.stack", instruction: "Turn the previous answer into focused flashcards.", newKind: .flashcards),
                 RefinementSuggestion(label: "Quiz me", systemImage: "checklist", instruction: "Turn the previous answer into a short quiz.", newKind: .quiz)
             ]
-        case .summary:
-            return universal + [
-                RefinementSuggestion(label: "Make flashcards", systemImage: "rectangle.stack", instruction: "Turn the previous answer into focused flashcards.", newKind: .flashcards),
-                RefinementSuggestion(label: "Quiz me", systemImage: "checklist", instruction: "Turn the previous answer into a short quiz.", newKind: .quiz)
-            ]
-        case .beginnerExplanation:
-            return universal + [
-                RefinementSuggestion(label: "Cheat sheet", systemImage: "doc.plaintext", instruction: "Condense the previous answer into a compact cheat sheet.", newKind: .cheatSheet)
-            ]
-        case .flashcards:
-            return universal + [
-                RefinementSuggestion(label: "Quiz me", systemImage: "checklist", instruction: "Turn the previous flashcards into a quiz.", newKind: .quiz)
-            ]
-        case .quiz:
-            return universal + [
-                RefinementSuggestion(label: "Harder", systemImage: "flame", instruction: "Make the previous quiz noticeably harder, with trickier distractors."),
-                RefinementSuggestion(label: "Show answers", systemImage: "checkmark.seal", instruction: "Provide a detailed answer key with explanations for the previous quiz.")
-            ]
-        case .cheatSheet:
-            return universal + [
-                RefinementSuggestion(label: "Quiz me", systemImage: "checklist", instruction: "Turn the previous cheat sheet into a quiz.", newKind: .quiz)
-            ]
+        default:
+            return universal
         }
     }
 }

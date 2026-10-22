@@ -2,7 +2,6 @@ import Foundation
 import MLX
 import MLXEmbedders
 import MLXLMCommon
-import MLXNN
 import Tokenizers
 
 enum EmbeddingInputKind: Sendable {
@@ -42,7 +41,7 @@ actor LocalEmbeddingRunner: EmbeddingService {
     static let shared = LocalEmbeddingRunner()
     static let dimension = 768
     static let maximumBatchSize = 8
-    static let maximumBatchTokens = 4_096
+    static let maximumBatchTokens = 1_024
     static let promptVersion = 1
 
     private let modelDownloadService: ManagedModelDownloadService
@@ -135,7 +134,7 @@ actor LocalEmbeddingRunner: EmbeddingService {
                 tokenTypeIds: nil,
                 attentionMask: mask
             )
-            let pooled = context.pooling(output, mask: mask, normalize: true)
+            let pooled = context.pooling(output, mask: mask, normalize: true).asType(.float32)
             pooled.eval()
             return try pooled.map { vector in
                 let values = vector.asArray(Float.self)
@@ -144,6 +143,12 @@ actor LocalEmbeddingRunner: EmbeddingService {
                 }
                 return Array(values.prefix(Self.dimension))
             }
+        }
+    }
+
+    private nonisolated static func removeLegacyModels() {
+        for profile in ModelCatalog.legacyEmbeddingModels {
+            _ = try? ModelCacheStore.removeCachedModel(for: profile)
         }
     }
 
@@ -157,7 +162,7 @@ actor LocalEmbeddingRunner: EmbeddingService {
             return try await loadTask.value
         }
 
-        let profile = ModelCatalog.embeddingGemma300M
+        let profile = ModelCatalog.embeddingModel
         let modelDownloadService = modelDownloadService
         let task = Task<EmbedderModelContainer, Error> {
             let result = try await modelDownloadService.ensureDownloaded(
@@ -170,10 +175,14 @@ actor LocalEmbeddingRunner: EmbeddingService {
                 throw LocalModelRunnerError.unsupportedProfile(profile.id)
             }
             configuration.id = .directory(result.directory)
-            return try await Self.loadCompatibleContainer(
-                directory: result.directory,
+            configuration.excludedComponents = [.vision, .audio]
+            let container = try await EmbedderModelFactory.shared.loadContainer(
+                from: LocalDirectoryOnlyDownloader(),
+                using: TransformersTokenizerLoader(),
                 configuration: configuration
             )
+            Self.removeLegacyModels()
+            return container
         }
         loadTask = task
         do {
@@ -185,86 +194,6 @@ actor LocalEmbeddingRunner: EmbeddingService {
             loadTask = nil
             throw error
         }
-    }
-
-    private nonisolated static func loadCompatibleContainer(
-        directory: URL,
-        configuration: ModelConfiguration
-    ) async throws -> EmbedderModelContainer {
-        let configurationData = try Data(
-            contentsOf: directory.appendingPathComponent("config.json")
-        )
-        let modelConfiguration = try JSONDecoder().decode(
-            Gemma3Configuration.self,
-            from: configurationData
-        )
-        let baseConfiguration = try JSONDecoder().decode(
-            BaseConfiguration.self,
-            from: configurationData
-        )
-
-        var weights: [String: MLXArray] = [:]
-        let enumerator = FileManager.default.enumerator(
-            at: directory,
-            includingPropertiesForKeys: nil
-        )
-        while let url = enumerator?.nextObject() as? URL {
-            guard url.pathExtension == "safetensors" else { continue }
-            for (key, value) in try loadArrays(url: url) {
-                weights[key] = value
-            }
-        }
-        if let embeddingWeight = weights["model.embed_tokens.weight"],
-           embeddingWeight.dim(0) > modelConfiguration.vocabularySize {
-            weights["model.embed_tokens.weight"] =
-                embeddingWeight[0..<modelConfiguration.vocabularySize]
-        }
-        weights = weights.filter {
-            !$0.key.contains("self_attn.rotary_emb.inv_freq")
-                && !$0.key.contains("lm_head")
-        }
-
-        let projectionSize =
-            weights["dense.0.weight"]?.dim(0)
-            ?? weights["dense.0.scales"]?.dim(0)
-            ?? modelConfiguration.intermediateSize
-        let model = EmbeddingGemma(modelConfiguration)
-        var modules = ModuleChildren()
-        modules["dense"] = .array([
-            .value(Linear(
-                modelConfiguration.hiddenSize,
-                projectionSize,
-                bias: false
-            )),
-            .value(Linear(
-                projectionSize,
-                modelConfiguration.hiddenSize,
-                bias: false
-            ))
-        ])
-        model.update(modules: modules)
-
-        if let perLayerQuantization = baseConfiguration.perLayerQuantization {
-            quantize(model: model) { path, _ in
-                guard weights["\(path).scales"] != nil else { return nil }
-                return perLayerQuantization.quantization(layer: path)?.asTuple
-            }
-        }
-        try model.update(
-            parameters: ModuleParameters.unflattened(weights),
-            verify: [.all]
-        )
-        eval(model)
-
-        let tokenizer = try await TransformersTokenizerLoader().load(from: directory)
-        return EmbedderModelContainer(
-            context: EmbedderModelContext(
-                configuration: configuration,
-                model: model,
-                tokenizer: tokenizer,
-                pooling: Pooling(strategy: .none)
-            )
-        )
     }
 }
 

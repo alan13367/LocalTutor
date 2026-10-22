@@ -84,6 +84,20 @@ enum AppDirectories {
         return directory
     }
 
+    static func notebooks(fileManager: FileManager = .default) throws -> URL {
+        let directory = try applicationSupportRoot(fileManager: fileManager)
+            .appendingPathComponent("Notebooks", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    static func audioOverviews(fileManager: FileManager = .default) throws -> URL {
+        let directory = try applicationSupportRoot(fileManager: fileManager)
+            .appendingPathComponent("AudioOverviews", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
     static func sessionsFile(fileManager: FileManager = .default) throws -> URL {
         try applicationSupportRoot(fileManager: fileManager)
             .appendingPathComponent("study-sessions.json", isDirectory: false)

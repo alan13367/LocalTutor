@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-macOS%2026.5%2B-blue" alt="macOS 26.5+" />
+  <img src="https://img.shields.io/badge/platform-macOS%2026%2B-blue" alt="macOS 26+" />
   <img src="https://img.shields.io/badge/chip-Apple%20Silicon-orange" alt="Apple Silicon" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
 </p>
@@ -25,83 +25,82 @@
 
 ## Why LocalTutor
 
-Most AI study tools send your notes to someone else's server. LocalTutor doesn't — every model runs on your Mac through Apple's [MLX](https://github.com/ml-explore/mlx-swift) framework, so your lecture slides, textbook PDFs, and class notes never leave your device. No API keys, no subscriptions, no cloud.
+Most AI study tools send your notes to someone else's server. LocalTutor doesn't. Every model runs on your Mac through Apple's [MLX](https://github.com/ml-explore/mlx-swift) framework, so your lecture slides, textbook PDFs, and class notes never leave your device. No API keys, no subscriptions, no cloud.
 
-It's designed to feel like sitting down with a real tutor: you bring your materials, ask questions, and get answers grounded in what you're actually studying.
+Think of it as a NotebookLM that lives entirely on your Mac.
 
 ---
 
 ## Features
 
-### 📚 Study with your own materials
+### 📓 Notebooks
 
-Drop or attach files and LocalTutor builds a searchable index of your content in seconds. Supported formats include:
+Each subject gets a notebook with its own sources, chats, notes, and study materials. Turn individual sources on or off to control what the tutor reads, and expand any source to see an automatic **source guide**: a short summary, key topics, and suggested questions.
 
 | Category | Formats |
 |----------|---------|
-| Documents | PDF, Word (`.docx`), Pages, RTF, ePub |
-| Spreadsheets | Excel (`.xlsx`), Numbers |
+| Documents | PDF, Word (`.docx`), Pages, RTF, EPUB |
+| Spreadsheets | Excel (`.xlsx`), Numbers, CSV |
 | Presentations | PowerPoint (`.pptx`), Keynote |
-| Images | JPEG, PNG, TIFF, HEIC, WebP |
-| Text | Markdown, plain text, CSV, JSON, XML, HTML |
-| Web | Web archives (`.webarchive`) |
+| Web | HTML, web archives (`.webarchive`) |
+| Images | JPEG, PNG, TIFF, HEIC, WebP (vision models) |
+| Text | Markdown, plain text, JSON, XML |
 
-Vision-capable models can read diagrams, charts, and handwritten notes directly from images and PDF pages.
+### 💬 Chat with citations
 
-### 💬 Conversational tutoring
+Answers are grounded in your sources and cite them inline, like `[3]`. Click a citation to open the exact passage: PDFs open at the right page with the text highlighted. Save any answer to your notes.
 
-Ask questions in natural language and get streaming, markdown-rendered answers grounded in your sources. The tutor cites specific sections, pages, and headings so you can verify everything it says.
+When the whole notebook fits in the model's context, LocalTutor keeps it in a cached prefix, so follow-up questions reuse the already-read sources instead of starting over. Larger notebooks switch to hybrid search automatically.
 
-Three study modes adapt the tutor's behavior:
+### 🎓 Studio
 
-- **Focused Study** — deep-dive into a specific topic within your sources
-- **Broad Overview** — survey across all attached materials for high-level understanding
-- **Open Ended** — free conversation without source material
+One click turns your sources into:
 
-Quick-action chips let you refine any answer instantly: *Expand · Simplify · Example · Why? · Deeper · Summarize · Compare · Related Topics*.
+- **Study Guide**: key concepts, practice questions, essay prompts, and a glossary
+- **Briefing**: an executive overview of every source
+- **Summary**, **Explainer**, **Cheat Sheet**
+- **Flashcards** with spaced repetition (Again / Hard / Good / Easy) and a daily review queue
+- **Quiz** with instant scoring and explanations
+- **Mind Map**: a collapsible visual map of topics. Right-click a node to ask about it.
+- **Audio Overview**: a two-host spoken recap read by on-device voices, exportable as an audio file
 
-### 🃏 Flashcards
-
-Generate flashcard decks from your sources with a single click. Each card includes a difficulty rating (easy, medium, hard) and the built-in player lets you flip, navigate, and shuffle through your deck — no export needed.
-
-### ✅ Quizzes
-
-Generate multiple-choice quizzes grounded in your materials. The quiz player scores your answers in real time, shows explanations for each question, and gives you a final breakdown when you're done.
+Flashcards, quizzes, mind maps, and audio scripts use schema-constrained decoding, so the output is always valid JSON.
 
 ### 🔍 Smart retrieval
 
-LocalTutor doesn't just dump your files into a prompt. A multi-stage retrieval pipeline finds the most relevant content for each question:
-
-1. **Heading matching** — recognizes section numbers, chapter titles, and heading hierarchies
-2. **Lexical search** — BM25 ranking via a persistent SQLite FTS5 index
-3. **Semantic search** — on-device vector embeddings (Gemma Embedder 300M) for meaning-based retrieval
-4. **Hybrid fusion** — combines lexical and semantic results with Reciprocal Rank Fusion
-5. **Context packing** — fits the best content into the model's token budget with proportional allocation
-
-All of this happens locally and automatically — you just ask your question.
+1. **Heading matching** recognizes section numbers, chapter titles, and heading hierarchies
+2. **Lexical search** uses BM25 ranking via a persistent SQLite FTS5 index
+3. **Semantic search** uses on-device embeddings (Embedding Gemma 300M)
+4. **Hybrid fusion** combines both with Reciprocal Rank Fusion
+5. **Context packing** fits the best passages into a token budget sized for your Mac
 
 ### 🧠 Model library
 
-Choose from models tiered to your Mac's memory:
+LocalTutor recommends a model for your Mac on first launch and sizes the context window to your memory.
 
-| Tier | Models | Capabilities |
-|------|--------|-------------|
-| **8 GB** | Gemma 3 1B, Qwen 3 1.7B | Text tutoring, fast responses |
-| **16 GB** | Gemma 3 4B, Qwen 3 4B, Phi-4 Mini | Multimodal vision, stronger reasoning |
+| Tier | Models |
+|------|--------|
+| **8 GB** | Gemma 4 E2B, Qwen3.5 4B |
+| **16 GB** | Gemma 4 E4B, Qwen3.5 9B, LFM2.5 8B-A1B |
+| **24 GB** | Gemma 4 12B |
+| **32 GB+** | Gemma 4 26B-A4B (MoE) |
 
-Models are downloaded once from Hugging Face and cached locally. A memory preflight check prevents loading a model that won't fit, and runtime policies cap generation length and source budgets per model.
+All models except LFM2.5 read images and scanned pages. Models download once from Hugging Face (standard MLX 4-bit builds) and are cached locally. On Macs with Apple Intelligence, quick tasks like source guides and chat titles run on Apple's built-in model so the tutor model stays free.
 
 ### ⚡ Performance
 
-- Token-by-token streaming at ~25 fps for responsive answers
-- Built-in benchmark suite measuring prefill speed, generation throughput, and time-to-first-token
-- Automatic embedding model lifecycle — loads for indexing/queries, unloads after 20 seconds of idle to free memory
-- Debounced session persistence so your study history is always saved
+- Context window scales with memory: 8K tokens on 8 GB Macs up to 32K (64K in Extended mode) on 32 GB+, with an 8-bit KV cache
+- Chat follow-ups continue from the cached conversation instead of re-reading every source
+- Multi-token prediction (MTP) for every Gemma 4 model: a small drafter proposes several tokens at once, making long answers 1.3× (E2B) to 1.8× (26B-A4B) faster on an M4 Max, in chat and in the Studio
+- Downloads can be paused, resumed (even after quitting) and cancelled; interrupted files continue from where they stopped
+- Requests queue instead of failing, with live progress while sources are read
+- Streaming text is isolated from notebook state, so long answers don't slow the UI
+- The embedding model loads only for indexing and search, and caches are freed under memory pressure
 
 ### 🔒 Privacy
 
-- **Fully offline** — inference, indexing, and retrieval all happen on-device
-- **App Sandbox** enabled — file access uses security-scoped bookmarks
+- **Fully offline** inference, indexing, and retrieval
+- **App Sandbox** with security-scoped bookmarks
 - **No telemetry, no accounts, no cloud**
 
 ---
@@ -110,7 +109,7 @@ Models are downloaded once from Hugging Face and cached locally. A memory prefli
 
 | | Minimum | Recommended |
 |---|---------|-------------|
-| **macOS** | 26.5 | Latest |
+| **macOS** | 26.0 | Latest |
 | **Chip** | Apple Silicon | Apple Silicon |
 | **Memory** | 8 GB unified | 16 GB unified |
 | **Xcode** | 16+ | Latest |
@@ -130,9 +129,20 @@ Models are downloaded once from Hugging Face and cached locally. A memory prefli
 
 3. Select the **LocalTutor** scheme and press **⌘R**.
 
-4. Open **Settings** (**⌘,**) → download a tutor model. Smaller models (1B–1.7B) download in minutes and run on any Apple Silicon Mac.
+4. On first launch, LocalTutor recommends a model for your Mac. Download it, or try the sample notebook first.
 
-5. Drag your study files into the workspace, type a question, and start studying. Try generating flashcards or a quiz from the toolbar.
+5. Drop your study files into a notebook, ask a question, and open the **Studio** panel to create guides, flashcards, quizzes, mind maps, or an audio overview.
+
+---
+
+## Distribution
+
+`scripts/release.sh` archives a Release build, signs it with your Developer ID, notarizes it with `notarytool`, staples the ticket, and zips the app:
+
+```bash
+xcrun notarytool store-credentials "LocalTutorNotary" --apple-id <apple-id> --team-id <TEAMID> --password <app-specific-password>
+DEVELOPMENT_TEAM=<TEAMID> scripts/release.sh 1.0
+```
 
 ---
 
@@ -140,19 +150,25 @@ Models are downloaded once from Hugging Face and cached locally. A memory prefli
 
 ```
 LocalTutor/
-├── Views/              SwiftUI — Study Workspace, Settings, artifact players
-│   └── Components/     Flashcard player, quiz player, composer, refinement chips
-├── Services/           Model runner, source extraction, indexing, retrieval, embedding
-├── Models/             Model profiles, study sessions, artifacts, runtime policies
+├── Views/              SwiftUI: workspace, sources, chat, Studio, settings, onboarding
+│   ├── State/          @Observable app state (notebooks, models, chat, studio)
+│   └── Components/     Markdown, flashcards, quiz, mind map, audio overview
+├── Services/           Model runner, extraction, indexing, retrieval, persistence
+├── Models/             Notebooks, model profiles, runtime policies, study payloads
+├── Resources/          Model catalog, sample notebook, string catalog
 └── Support/            Constants, helpers, file paths
 
-LocalTutorTests/        Unit tests (Swift Testing)
+LocalTutorTests/        Unit tests (Swift Testing) + opt-in real-model integration tests
+scripts/release.sh      Archive, notarize and staple a Developer ID build
 ```
 
 ## Tech stack
 
 - **SwiftUI** — native macOS interface with `NavigationSplitView`
-- **[MLX Swift](https://github.com/ml-explore/mlx-swift)** + **[mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm)** — on-device LLM and embedding inference
+- **[MLX Swift](https://github.com/ml-explore/mlx-swift)** + **[mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm)**: on-device LLM, VLM and embedding inference, plus guided JSON generation
+- **FoundationModels**: Apple Intelligence for lightweight helper tasks
+- **AVFoundation**: on-device speech for audio overviews
+- **PDFKit**: citation viewer with page navigation and highlighting
 - **[swift-huggingface](https://github.com/huggingface/swift-huggingface)** — model downloads from Hugging Face Hub
 - **SQLite / FTS5** — persistent source indexing and full-text search
 - **CryptoKit** — content fingerprinting for cache invalidation

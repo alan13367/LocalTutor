@@ -10,7 +10,7 @@ import SwiftUI
 
 @MainActor
 final class ModelLabViewModel: ObservableObject {
-    @Published var profiles = ModelProfile.v0Catalog
+    @Published var profiles = ModelProfile.studyCatalog
     @Published var selectedProfileID = ModelProfile.recommendedDefault.id
     @Published var prompt = """
     You are LocalTutor. Explain the attached material or prompt like a careful tutor, then list the most important facts a student should remember.
@@ -183,7 +183,7 @@ final class ModelLabViewModel: ObservableObject {
             downloadProgress = update.fraction
             statusMessage = update.message
 
-        case .reasoningChunk:
+        case .reasoningChunk, .prefillProgress:
             break
 
         case .outputChunk(let chunk):

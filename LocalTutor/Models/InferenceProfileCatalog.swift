@@ -4,133 +4,178 @@
 //
 
 import Foundation
+import MLXLLM
 import MLXLMCommon
 import MLXVLM
 
+struct ModelCatalogFile: Decodable {
+    var version: Int
+    var models: [ModelCatalogEntry]
+}
+
+struct ModelCatalogEntry: Decodable, Equatable {
+    enum Loader: String, Decodable {
+        case llm
+        case vlm
+    }
+
+    var id: String
+    var name: String
+    var subtitle: String
+    var repository: String
+    var loader: Loader
+    var kind: ModelProfileKind
+    var tier: ModelTier
+    var publisher: String
+    var summary: String
+    var parameterScale: String
+    var strengths: [String]
+    var recommended: Bool
+    var downloadBytes: UInt64
+    var kvBytesPerToken: Int
+    var maxContextTokens: Int
+    var documentImageLimit: Int?
+    var disableThinking: Bool?
+    var toolCallFormat: String?
+    var maxTokens: Int?
+    var temperature: Float?
+    var drafterRepository: String?
+    var drafterBytes: UInt64?
+}
+
 enum ModelCatalog {
-    static let gemma4E2B = ModelProfile(
-        id: "gemma4E2B",
-        name: "Gemma 4 E2B",
-        subtitle: "8GB baseline, text and vision capable",
-        modelIdentifier: "mlx-community/gemma-4-e2b-it-4bit",
-        kind: .vision,
-        tier: .eightGB,
-        minimumSystemMemoryBytes: 8.gibibytes,
-        defaults: ModelRuntimeDefaults.vision
-            .withDocumentImageLimit(1),
-        configuration: .vlm(VLMRegistry.gemma4_E2B_it_4bit),
-        publisher: "Google",
-        summary: "Compact multimodal tutor. The fastest Gemma 4 build, tuned for Macs with 8 GB unified memory.",
-        parameterScale: "≈ 2B params · 4-bit MLX",
-        strengths: ["Vision", "Fast on 8 GB", "Multilingual"],
-        isRecommended: true
-    )
-
-    static let gemma4E4B = ModelProfile(
-        id: "gemma4E4B",
-        name: "Gemma 4 E4B",
-        subtitle: "16GB tier, stronger multimodal reasoning",
-        modelIdentifier: "mlx-community/gemma-4-e4b-it-4bit",
-        kind: .vision,
-        tier: .sixteenGB,
-        minimumSystemMemoryBytes: 16.gibibytes,
-        defaults: ModelRuntimeDefaults.vision
-            .withDocumentImageLimit(1)
-            .withMaxTokens(512)
-            .withMaxKVSize(2_048)
-            .withPrefillStepSize(64),
-        configuration: .vlm(VLMRegistry.gemma4_E4B_it_4bit),
-        publisher: "Google",
-        summary: "Balanced multimodal model. Best baseline quality for 16 GB Macs across study tasks.",
-        parameterScale: "≈ 4B params · 4-bit MLX",
-        strengths: ["Vision", "Stronger reasoning", "Long context"],
-        isRecommended: true
-    )
-
-    static let qwen3VL4B = ModelProfile(
-        id: "qwen3VL4B",
-        name: "Qwen3-VL 4B",
-        subtitle: "Alibaba multimodal, sharp at diagrams and text",
-        modelIdentifier: "mlx-community/Qwen3-VL-4B-Instruct-4bit",
-        kind: .vision,
-        tier: .sixteenGB,
-        minimumSystemMemoryBytes: 16.gibibytes,
-        defaults: ModelRuntimeDefaults.vision
-            .withDocumentImageLimit(4)
-            .withMaxTokens(512)
-            .withMaxKVSize(2_048)
-            .withPrefillStepSize(64),
-        configuration: .vlm(VLMRegistry.qwen3VL4BInstruct4Bit),
-        publisher: "Alibaba",
-        summary: "Top-tier small vision model. Excellent OCR and document understanding for screenshots and slides.",
-        parameterScale: "≈ 4B params · 4-bit MLX",
-        strengths: ["Best-in-class OCR", "Diagrams", "Long answers"]
-    )
-
-    static let lfm25A1B8B = ModelProfile(
-        id: "lfm25A1B8B",
-        name: "LFM2.5 8B-A1B",
-        subtitle: "16GB tier, text-only MoE study model",
-        modelIdentifier: "mlx-community/LFM2.5-8B-A1B-MLX-4bit",
-        kind: .text,
-        tier: .sixteenGB,
-        minimumSystemMemoryBytes: 16.gibibytes,
-        defaults: ModelRuntimeDefaults.text
-            .withPrefillStepSize(128),
-        configuration: .llm(
-            ModelConfiguration(
-                id: "mlx-community/LFM2.5-8B-A1B-MLX-4bit",
-                toolCallFormat: .lfm2
-            )
-        ),
-        publisher: "Liquid AI",
-        summary: "Fast text-only MoE model for summaries, explanations, flashcards, and Q&A over readable source text.",
-        parameterScale: "8.3B total / 1.5B active · 4-bit MLX",
-        strengths: ["Text-only", "Long context", "Fast MoE"]
-    )
-
-    static let embeddingGemma300M = ModelProfile(
-        id: "embeddingGemma300M",
-        name: "Embedding Gemma 300M",
+    static let embeddingModel = ModelProfile(
+        id: "embeddingGemma2",
+        name: "EmbeddingGemma 2",
         subtitle: "Background model for Dense Semantic Retrieval",
-        modelIdentifier: "mlx-community/embeddinggemma-300m-4bit",
+        modelIdentifier: "mlx-community/embeddinggemma-2-8bit",
         kind: .text,
         tier: .eightGB,
         minimumSystemMemoryBytes: 4.gibibytes,
         defaults: ModelRuntimeDefaults.text,
         configuration: .embedder(
             ModelConfiguration(
-                id: "mlx-community/embeddinggemma-300m-4bit"
+                id: "mlx-community/embeddinggemma-2-8bit"
             )
         ),
         publisher: "Google",
-        summary: "Lightweight embedding model used silently by the app for semantic retrieval.",
-        parameterScale: "300M params · 4-bit MLX",
-        strengths: ["Embeddings", "Fast", "Semantic Search"]
+        summary: "Multilingual embedding model used silently by the app for semantic retrieval. Only its text encoder is loaded.",
+        parameterScale: "270M text encoder · 8-bit MLX",
+        strengths: ["Embeddings", "Multilingual", "8K context"],
+        downloadBytes: 1_267_000_000
     )
 
-    /// The original v0 catalog. Retained so existing tests keep passing.
-    static let v0Catalog: [ModelProfile] = [
-        gemma4E2B,
-        gemma4E4B
+    static let legacyEmbeddingModels: [ModelProfile] = [
+        ModelProfile(
+            id: "embeddingGemma300M",
+            name: "Embedding Gemma 300M",
+            subtitle: "Background model for Dense Semantic Retrieval",
+            modelIdentifier: "mlx-community/embeddinggemma-300m-4bit",
+            kind: .text,
+            tier: .eightGB,
+            minimumSystemMemoryBytes: 4.gibibytes,
+            defaults: ModelRuntimeDefaults.text,
+            configuration: .embedder(ModelConfiguration(id: "mlx-community/embeddinggemma-300m-4bit")),
+            publisher: "Google",
+            summary: "",
+            parameterScale: "300M params · 4-bit MLX",
+            strengths: [],
+            downloadBytes: 230_000_000
+        )
     ]
 
-    /// Full curated catalog shown in Settings. Entries are MLX-format and gated by
-    /// minimum unified-memory tier.
-    static let studyCatalog: [ModelProfile] = [
-        gemma4E2B,
-        gemma4E4B,
-        qwen3VL4B,
-        lfm25A1B8B
-    ]
+    static let entries: [ModelCatalogEntry] = loadEntries()
+
+    static let studyCatalog: [ModelProfile] = entries.map(profile(from:))
 
     static func profile(withID id: String) -> ModelProfile? {
         studyCatalog.first { $0.id == id }
     }
 
+    static func require(_ id: String) -> ModelProfile {
+        guard let profile = profile(withID: id) else {
+            preconditionFailure("Model \(id) is missing from ModelCatalog.json")
+        }
+        return profile
+    }
+
+    static func disablesThinking(_ profile: ModelProfile) -> Bool {
+        entries.first { $0.id == profile.id }?.disableThinking ?? false
+    }
+
     static var recommendedDefault: ModelProfile {
-        ProcessInfo.processInfo.physicalMemory >= 16.gibibytes ? gemma4E4B : gemma4E2B
+        recommended(forSystemMemory: ProcessInfo.processInfo.physicalMemory)
+    }
+
+    static func recommended(forSystemMemory bytes: UInt64) -> ModelProfile {
+        let tier = ModelTier.tier(forSystemMemory: bytes)
+        let candidates = studyCatalog.filter { $0.isRecommended && $0.tier <= tier }
+        return candidates.max { $0.tier < $1.tier } ?? studyCatalog[0]
+    }
+
+    static func profile(from entry: ModelCatalogEntry) -> ModelProfile {
+        let base: ModelRuntimeDefaults = entry.kind == .vision ? .vision : .text
+        var defaults = base.withMaxContextTokens(entry.maxContextTokens)
+        if let limit = entry.documentImageLimit {
+            defaults = defaults.withDocumentImageLimit(limit)
+        }
+        if let maxTokens = entry.maxTokens {
+            defaults = defaults.withMaxTokens(maxTokens)
+        }
+        if let temperature = entry.temperature {
+            defaults.temperature = temperature
+        }
+
+        return ModelProfile(
+            id: entry.id,
+            name: entry.name,
+            subtitle: entry.subtitle,
+            modelIdentifier: entry.repository,
+            kind: entry.kind,
+            tier: entry.tier,
+            minimumSystemMemoryBytes: entry.tier.minimumSystemMemoryBytes,
+            defaults: defaults,
+            configuration: configuration(for: entry),
+            publisher: entry.publisher,
+            summary: entry.summary,
+            parameterScale: entry.parameterScale,
+            strengths: entry.strengths,
+            isRecommended: entry.recommended,
+            downloadBytes: entry.downloadBytes,
+            kvBytesPerToken: entry.kvBytesPerToken,
+            drafterRepository: entry.drafterRepository,
+            drafterBytes: entry.drafterBytes ?? 0
+        )
+    }
+
+    private static func configuration(for entry: ModelCatalogEntry) -> ProfileModelConfiguration {
+        switch entry.loader {
+        case .vlm:
+            return .vlm(VLMModelFactory.shared.configuration(id: entry.repository))
+        case .llm:
+            var configuration = LLMModelFactory.shared.configuration(id: entry.repository)
+            if let format = entry.toolCallFormat.flatMap(ToolCallFormat.init(rawValue:)) {
+                configuration.toolCallFormat = format
+            }
+            return .llm(configuration)
+        }
+    }
+
+    private static func loadEntries() -> [ModelCatalogEntry] {
+        let bundles = [Bundle.main, Bundle(for: CatalogBundleToken.self)]
+        for bundle in bundles {
+            guard let url = bundle.url(forResource: "ModelCatalog", withExtension: "json"),
+                  let data = try? Data(contentsOf: url),
+                  let file = try? JSONDecoder().decode(ModelCatalogFile.self, from: data),
+                  !file.models.isEmpty else {
+                continue
+            }
+            return file.models
+        }
+        preconditionFailure("ModelCatalog.json is missing from the app bundle")
     }
 }
+
+private final class CatalogBundleToken {}
 
 typealias InferenceProfileCatalog = ModelCatalog

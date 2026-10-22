@@ -1,0 +1,875 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "" : {
+
+    },
+    "%@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "%@ · %@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$@ · %3$@"
+          }
+        }
+      }
+    },
+    "%@ · %@ · %lld passages" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$@ · %3$lld passages"
+          }
+        }
+      }
+    },
+    "%@ · %@ memory" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$@ memory"
+          }
+        }
+      }
+    },
+    "%@ %@ reads up to %@ tokens (about %@ words of sources) per question." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ %2$@ reads up to %3$@ tokens (about %4$@ words of sources) per question."
+          }
+        }
+      }
+    },
+    "%@ exceeds the %@ budget for %@. Each question retrieves the most relevant passages." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ exceeds the %2$@ budget for %3$@. Each question retrieves the most relevant passages."
+          }
+        }
+      }
+    },
+    "%@ of %@. Follow-up questions reuse the already-read sources, so they start much faster." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ of %2$@. Follow-up questions reuse the already-read sources, so they start much faster."
+          }
+        }
+      }
+    },
+    "%@, next review in %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, next review in %2$@"
+          }
+        }
+      }
+    },
+    "%lld" : {
+
+    },
+    "%lld %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld %2$@"
+          }
+        }
+      }
+    },
+    "%lld card%@ due" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld card%2$@ due"
+          }
+        }
+      }
+    },
+    "%lld left · %lld reviewed" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld left · %2$lld reviewed"
+          }
+        }
+      }
+    },
+    "%lld of %lld correct" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld correct"
+          }
+        }
+      }
+    },
+    "%lld of %lld selected" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld selected"
+          }
+        }
+      }
+    },
+    "%lld percent" : {
+
+    },
+    "%lld." : {
+
+    },
+    "%lld/%lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld/%2$lld"
+          }
+        }
+      }
+    },
+    "%lld%%" : {
+
+    },
+    "•" : {
+
+    },
+    "≈ %lld min · %lld lines · on-device voices" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "≈ %1$lld min · %2$lld lines · on-device voices"
+          }
+        }
+      }
+    },
+    "A" : {
+
+    },
+    "A notebook holds the sources for one subject. Ask questions, and LocalTutor answers with citations, all on your Mac." : {
+
+    },
+    "About" : {
+
+    },
+    "Actions" : {
+
+    },
+    "Add" : {
+
+    },
+    "Add PDFs, documents, slides, images or web pages" : {
+
+    },
+    "Add Sources" : {
+
+    },
+    "Add sources (⌘O)" : {
+
+    },
+    "Add Sources…" : {
+
+    },
+    "Add your study material" : {
+
+    },
+    "All caught up" : {
+
+    },
+    "Answer: %@" : {
+
+    },
+    "Apple Intelligence" : {
+
+    },
+    "Apple Intelligence will write quick source summaries and chat titles." : {
+
+    },
+    "Ask a question" : {
+
+    },
+    "Ask About \"%@\"" : {
+
+    },
+    "Ask about %@" : {
+
+    },
+    "Ask this question" : {
+
+    },
+    "B" : {
+
+    },
+    "Back" : {
+
+    },
+    "Cancel" : {
+
+    },
+    "Cards are scheduled for future review automatically." : {
+
+    },
+    "Check answer" : {
+
+    },
+    "Choose a different model…" : {
+
+    },
+    "Choose Image" : {
+
+    },
+    "Citation %lld" : {
+
+    },
+    "Cited passage: %@" : {
+
+    },
+    "Clear Cache" : {
+
+    },
+    "Clear Index" : {
+
+    },
+    "Click a branch to fold it · Right-click to ask about a topic" : {
+
+    },
+    "Close" : {
+
+    },
+    "Collapse" : {
+
+    },
+    "Come back later. New cards appear when you create flashcards." : {
+
+    },
+    "Context size" : {
+
+    },
+    "Continue with %@" : {
+
+    },
+    "Copy answer" : {
+
+    },
+    "Copy as Markdown" : {
+
+    },
+    "Couldn't create this %@" : {
+
+    },
+    "Create %@" : {
+
+    },
+    "Create a notebook to get started." : {
+
+    },
+    "Create Again" : {
+
+    },
+    "Create your first notebook" : {
+
+    },
+    "Created" : {
+
+    },
+    "Creating your %@ from %lld source%@…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Creating your %1$@ from %2$lld source%3$@…"
+          }
+        }
+      }
+    },
+    "Delete" : {
+
+    },
+    "Delete \"%@\"?" : {
+
+    },
+    "Delete Note" : {
+
+    },
+    "Delete Notebook" : {
+
+    },
+    "Delete Notebook…" : {
+
+    },
+    "Delete This Chat" : {
+
+    },
+    "Deselect all" : {
+
+    },
+    "Disk" : {
+
+    },
+    "Dismiss" : {
+
+    },
+    "Documents" : {
+
+    },
+    "Done" : {
+
+    },
+    "Download" : {
+
+    },
+    "Download %@ (%@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Download %1$@ (%2$@)"
+          }
+        }
+      }
+    },
+    "Download progress" : {
+
+    },
+    "Drop to add as sources" : {
+
+    },
+    "Edit" : {
+
+    },
+    "Embedding Gemma 300M" : {
+
+    },
+    "Everything (models, sources, notebooks) stays on this Mac. No accounts, no telemetry." : {
+
+    },
+    "Exclude from Answers" : {
+
+    },
+    "Expand" : {
+
+    },
+    "Expected: %@" : {
+
+    },
+    "Export failed" : {
+
+    },
+    "Export JSON" : {
+
+    },
+    "Export…" : {
+
+    },
+    "Failed · tap for details" : {
+
+    },
+    "Faster generation (multi-token prediction)" : {
+
+    },
+    "Final score" : {
+
+    },
+    "Finds passages by meaning, not just keywords, for large notebooks. It loads only while indexing or searching and unloads when idle." : {
+
+    },
+    "Flip to see the answer" : {
+
+    },
+    "Focus topic for generated materials" : {
+
+    },
+    "Generate source guide" : {
+
+    },
+    "Generate Source Guide" : {
+
+    },
+    "Generating" : {
+
+    },
+    "Grade this card" : {
+
+    },
+    "Guide by %@" : {
+
+    },
+    "Helpers" : {
+
+    },
+    "Hide source guide" : {
+
+    },
+    "Hide Studio" : {
+
+    },
+    "Host A" : {
+
+    },
+    "Host B" : {
+
+    },
+    "Icon" : {
+
+    },
+    "Image · read by vision models" : {
+
+    },
+    "Images are read directly by vision models when you ask a question." : {
+
+    },
+    "In use" : {
+
+    },
+    "Include in Answers" : {
+
+    },
+    "Indexing…" : {
+
+    },
+    "Install Now" : {
+
+    },
+    "Installed" : {
+
+    },
+    "Its chats, notes and study materials will be removed. Your original files are not touched." : {
+
+    },
+    "Large notebook: answers use search" : {
+
+    },
+    "LocalTutor" : {
+
+    },
+    "LocalTutor picked the best model for this Mac. You can change it anytime in Settings." : {
+
+    },
+    "Metrics" : {
+
+    },
+    "Mind map of %@" : {
+
+    },
+    "Mode" : {
+
+    },
+    "Model Lab" : {
+
+    },
+    "Models" : {
+
+    },
+    "Models and settings (⌘,)" : {
+
+    },
+    "Name" : {
+
+    },
+    "Needs %@" : {
+
+    },
+    "Needs %@ Mac" : {
+
+    },
+    "New Chat" : {
+
+    },
+    "New note" : {
+
+    },
+    "New Note" : {
+
+    },
+    "New Notebook" : {
+
+    },
+    "Next" : {
+
+    },
+    "Next line" : {
+
+    },
+    "Nice work" : {
+
+    },
+    "Nice work: %lld review%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Nice work: %1$lld review%2$@"
+          }
+        }
+      }
+    },
+    "No accounts, no cloud, no telemetry. Models download once from Hugging Face." : {
+
+    },
+    "No models downloaded." : {
+
+    },
+    "No notebook" : {
+
+    },
+    "Notebook name" : {
+
+    },
+    "Notebooks" : {
+
+    },
+    "Notes" : {
+
+    },
+    "Nothing due" : {
+
+    },
+    "OK" : {
+
+    },
+    "Open" : {
+
+    },
+    "Open in Default App" : {
+
+    },
+    "Optional focus, e.g. \"Chapter 3\" or \"photosynthesis\"" : {
+
+    },
+    "Optional Image" : {
+
+    },
+    "Output" : {
+
+    },
+    "Passages" : {
+
+    },
+    "Pause" : {
+
+    },
+    "PDFs, Word, Pages, slides, spreadsheets, EPUBs, web pages and images. Drop files anywhere in the window." : {
+
+    },
+    "PDFs, Word, PowerPoint, Excel, text, and screenshots" : {
+
+    },
+    "Play" : {
+
+    },
+    "Practice Again" : {
+
+    },
+    "Preview" : {
+
+    },
+    "Previous line" : {
+
+    },
+    "Profiles" : {
+
+    },
+    "Prompt" : {
+
+    },
+    "Q%lld. %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Q%1$lld. %2$@"
+          }
+        }
+      }
+    },
+    "Question %lld of %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Question %1$lld of %2$lld"
+          }
+        }
+      }
+    },
+    "Reading sources" : {
+
+    },
+    "Reads images and scanned pages" : {
+
+    },
+    "Reasoning" : {
+
+    },
+    "Recommended" : {
+
+    },
+    "Refine" : {
+
+    },
+    "Regenerate" : {
+
+    },
+    "Regenerate answer" : {
+
+    },
+    "Regenerate Source Guide" : {
+
+    },
+    "Remove" : {
+
+    },
+    "Remove %@?" : {
+
+    },
+    "Remove Download" : {
+
+    },
+    "Remove image" : {
+
+    },
+    "Remove Source" : {
+
+    },
+    "Remove…" : {
+
+    },
+    "Rename Notebook" : {
+
+    },
+    "Rename…" : {
+
+    },
+    "Restart" : {
+
+    },
+    "Resume" : {
+
+    },
+    "Review" : {
+
+    },
+    "Review Due Flashcards" : {
+
+    },
+    "Right-click to ask about this topic" : {
+
+    },
+    "Run" : {
+
+    },
+    "Save" : {
+
+    },
+    "Save answers from the chat, or write your own notes." : {
+
+    },
+    "Save as audio file" : {
+
+    },
+    "Save to notes" : {
+
+    },
+    "Save to Notes" : {
+
+    },
+    "See results" : {
+
+    },
+    "Select all" : {
+
+    },
+    "Selected" : {
+
+    },
+    "Semantic search" : {
+
+    },
+    "Send (↩)" : {
+
+    },
+    "Send question" : {
+
+    },
+    "Session complete" : {
+
+    },
+    "Show Answer" : {
+
+    },
+    "Show Data Folder in Finder" : {
+
+    },
+    "Show fewer models" : {
+
+    },
+    "Show in Finder" : {
+
+    },
+    "Show source guide" : {
+
+    },
+    "Show Studio" : {
+
+    },
+    "Skip for now" : {
+
+    },
+    "Source index" : {
+
+    },
+    "Sources" : {
+
+    },
+    "Sources are re-indexed automatically the next time they are used." : {
+
+    },
+    "Space to flip · 1–4 to grade" : {
+
+    },
+    "Spaced repetition across %lld flashcards" : {
+
+    },
+    "Speaking rate" : {
+
+    },
+    "Speed" : {
+
+    },
+    "Start with your sources" : {
+
+    },
+    "Status" : {
+
+    },
+    "Stop" : {
+
+    },
+    "Stop (⌘.)" : {
+
+    },
+    "Stop and delete the partial download" : {
+
+    },
+    "Stop generating" : {
+
+    },
+    "Stop Generating" : {
+
+    },
+    "Stop generating %@" : {
+
+    },
+    "Storage" : {
+
+    },
+    "Studio" : {
+
+    },
+    "Study" : {
+
+    },
+    "Summarizing…" : {
+
+    },
+    "Switch chats" : {
+
+    },
+    "Text-only prompts use the same Gemma 4 VLM path." : {
+
+    },
+    "Thinking…" : {
+
+    },
+    "This frees %@. You can download it again later." : {
+
+    },
+    "This item was deleted" : {
+
+    },
+    "This Mac" : {
+
+    },
+    "Title" : {
+
+    },
+    "Try Again" : {
+
+    },
+    "Try the sample notebook" : {
+
+    },
+    "Tutor model" : {
+
+    },
+    "Type your answer" : {
+
+    },
+    "Unload" : {
+
+    },
+    "Use" : {
+
+    },
+    "Use %@ in answers" : {
+
+    },
+    "Use Apple Intelligence for quick tasks" : {
+
+    },
+    "Vectors" : {
+
+    },
+    "Vision capable" : {
+
+    },
+    "Waiting to index" : {
+
+    },
+    "Welcome to LocalTutor" : {
+
+    },
+    "Whole notebook in context" : {
+
+    },
+    "Writes source guides and chat titles with Apple's built-in on-device model, so your tutor model stays free for answers." : {
+
+    },
+    "You asked: %@" : {
+
+    },
+    "You can pause anytime and pick up where you left off, even after quitting." : {
+
+    },
+    "Your private study partner. Add your notes and textbooks, ask questions, and get answers with citations, all running on this Mac." : {
+
+    }
+  },
+  "version" : "1.0"
+}

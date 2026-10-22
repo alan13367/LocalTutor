@@ -4,38 +4,49 @@
 //
 //
 
+import Foundation
 import Testing
 @testable import LocalTutor
 
 struct InferenceProfileTests {
     @Test
-    func v0CatalogContainsGemma4BaseProfiles() {
-        let profiles = ModelProfile.v0Catalog
+    func catalogLoadsFromBundledJSONInTierOrder() {
+        let ids = ModelProfile.studyCatalog.map(\.id)
 
-        #expect(profiles.map(\.id) == ["gemma4E2B", "gemma4E4B"])
-        #expect(profiles.allSatisfy { $0.kind == .vision })
-        #expect(profiles.map(\.modelIdentifier) == [
-            "mlx-community/gemma-4-e2b-it-4bit",
-            "mlx-community/gemma-4-e4b-it-4bit"
-        ])
-        #expect(profiles.map(\.minimumSystemMemoryBytes) == [
-            8.gibibytes,
-            16.gibibytes
-        ])
-        #expect(profiles.map(\.defaults.documentImageLimit) == [1, 1])
-        #expect(profiles.map(\.defaults.maxKVSize) == [6_144, 2_048])
-        #expect(ModelProfile.gemma4E4B.defaults.maxTokens == 512)
-        #expect(ModelProfile.gemma4E4B.defaults.prefillStepSize == 64)
+        #expect(ids == ["gemma4E2B", "qwen35_4B", "gemma4E4B", "qwen35_9B", "lfm25A1B8B", "gemma4_12B", "gemma4_26B_A4B"])
+        #expect(ModelProfile.studyCatalog.map(\.tier) == ModelProfile.studyCatalog.map(\.tier).sorted())
+        #expect(ModelProfile.studyCatalog.allSatisfy { $0.downloadBytes > 0 && $0.kvBytesPerToken > 0 })
     }
 
     @Test
-    func studyCatalogContainsOnlyReliableStructuredOutputProfiles() {
-        let profiles = ModelProfile.studyCatalog
+    func catalogUsesStandardQuantizationsOnly() {
+        for profile in ModelProfile.studyCatalog {
+            #expect(!profile.modelIdentifier.localizedCaseInsensitiveContains("optiq"))
+            #expect(profile.modelIdentifier.hasPrefix("mlx-community/"))
+        }
+    }
 
-        #expect(profiles.map(\.id) == ["gemma4E2B", "gemma4E4B", "qwen3VL4B", "lfm25A1B8B"])
-        #expect(ModelProfile.qwen3VL4B.defaults.maxKVSize == 2_048)
-        #expect(ModelProfile.qwen3VL4B.defaults.maxTokens == 512)
-        #expect(ModelProfile.qwen3VL4B.defaults.prefillStepSize == 64)
+    @Test
+    func visionProfilesLoadThroughVLMFactoryAndTextThroughLLM() {
+        for profile in ModelProfile.studyCatalog {
+            switch profile.configuration {
+            case .vlm:
+                #expect(profile.kind == .vision)
+            case .llm:
+                #expect(profile.kind == .text)
+            case .embedder:
+                Issue.record("\(profile.id) should not be an embedder")
+            }
+        }
+    }
+
+    @Test
+    func visionProfilesKeepVisionInRuntimePolicy() {
+        let policy = ModelRuntimePolicyProvider.policy(for: .gemma4E4B, systemMemoryBytes: 16.gibibytes)
+
+        #expect(policy.supportsVision)
+        #expect(policy.documentImageLimit == 4)
+        #expect(policy.extractionOptions.imageLimit == 4)
     }
 
     @Test
@@ -48,56 +59,146 @@ struct InferenceProfileTests {
         #expect(lfm.modelIdentifier == "mlx-community/LFM2.5-8B-A1B-MLX-4bit")
         #expect(policy.documentImageLimit == 0)
         #expect(policy.generationDefaults.imageResize == nil)
-        #expect(policy.generationDefaults.maxKVSize == 6_144)
-        #expect(policy.generationDefaults.prefillStepSize == 128)
-
-        if case .llm = lfm.configuration {
-            #expect(true)
+        if case .llm(let configuration) = lfm.configuration {
+            #expect(configuration.toolCallFormat == .lfm2)
         } else {
             Issue.record("LFM should load through the LLM factory.")
         }
     }
 
     @Test
-    func legacyInferenceAliasesRemainSourceCompatible() {
-        #expect(InferenceProfile.gemma4E2B.id == ModelProfile.gemma4E2B.id)
-        #expect(InferenceProfileCatalog.studyCatalog.map(\.id) == ModelCatalog.studyCatalog.map(\.id))
-        #expect(GenerationDefaults.vision == ModelRuntimeDefaults.vision)
+    func qwenProfilesDisableThinkingForFastAnswers() {
+        #expect(ModelCatalog.disablesThinking(.qwen35_4B))
+        #expect(ModelCatalog.disablesThinking(.qwen35_9B))
+        #expect(!ModelCatalog.disablesThinking(.gemma4E4B))
+        #expect(LocalModelRunner.chatTemplateContext(for: .qwen35_9B)?["enable_thinking"] as? Bool == false)
+        #expect(LocalModelRunner.chatTemplateContext(for: .gemma4E2B) == nil)
     }
 
     @Test
-    func e4BPromptBudgetLeavesRuntimeHeadroom() {
-        let budget = PromptPacker.promptBudget(for: .gemma4E4B, resourceKind: .summary)
-
-        #expect(budget <= ModelProfile.gemma4E4B.defaults.maxKVSize / 3)
-        #expect(budget >= 256)
+    func recommendedDefaultScalesWithMemory() {
+        #expect(ModelCatalog.recommended(forSystemMemory: 8.gibibytes).id == "gemma4E2B")
+        #expect(ModelCatalog.recommended(forSystemMemory: 16.gibibytes).id == "gemma4E4B")
+        #expect(ModelCatalog.recommended(forSystemMemory: 24.gibibytes).id == "gemma4_12B")
+        #expect(ModelCatalog.recommended(forSystemMemory: 64.gibibytes).id == "gemma4_26B_A4B")
     }
 
     @Test
-    func runtimePolicyMatchesCurrentModelConstants() {
-        let e2B = ModelRuntimePolicyProvider.policy(for: .gemma4E2B, systemMemoryBytes: 16.gibibytes)
-        let e4B = ModelRuntimePolicyProvider.policy(for: .gemma4E4B, systemMemoryBytes: 16.gibibytes)
-        let qwen = ModelRuntimePolicyProvider.policy(for: .qwen3VL4B, systemMemoryBytes: 16.gibibytes)
+    func contextWindowGrowsWithMemoryUpToTheModelLimit() {
+        let architecture = ModelArchitecture(nativeContextTokens: 131_072, kvBytesPerToken: 16_384, fixedCacheBytes: 0)
+        func context(_ memory: UInt64) -> Int {
+            ModelRuntimePolicyProvider.policy(
+                for: .gemma4E4B,
+                systemMemoryBytes: memory,
+                preference: .extended,
+                architecture: architecture
+            ).contextTokens
+        }
 
-        #expect(e2B.generationDefaults == ModelProfile.gemma4E2B.defaults)
-        #expect(e4B.generationDefaults == ModelProfile.gemma4E4B.defaults)
-        #expect(qwen.generationDefaults == ModelProfile.qwen3VL4B.defaults)
-
-        #expect(e2B.cacheLimitBytes == 128 * 1024 * 1024)
-        #expect(e4B.cacheLimitBytes == 64 * 1024 * 1024)
-        #expect(qwen.cacheLimitBytes == 64 * 1024 * 1024)
-        #expect([e2B.documentImageLimit, e4B.documentImageLimit, qwen.documentImageLimit] == [0, 0, 0])
+        #expect(context(8.gibibytes) == ContextBudget.minimumContextTokens)
+        #expect(context(12.gibibytes) > context(8.gibibytes))
+        #expect(context(12.gibibytes) < context(16.gibibytes))
+        #expect(context(16.gibibytes) == 131_072)
+        #expect(context(128.gibibytes) == 131_072)
+        #expect(context(36.gibibytes) % 1_024 == 0)
     }
 
     @Test
-    func promptBudgetsMatchCurrentRuntimePolicy() {
-        let e2B = ModelRuntimePolicyProvider.policy(for: .gemma4E2B, systemMemoryBytes: 16.gibibytes)
-        let e4B = ModelRuntimePolicyProvider.policy(for: .gemma4E4B, systemMemoryBytes: 16.gibibytes)
+    func balancedContextFollowsMeasuredPrefillSpeed() {
+        let architecture = ModelArchitecture(nativeContextTokens: 131_072, kvBytesPerToken: 6_144, fixedCacheBytes: 0)
+        func context(_ speed: Double?, _ preference: ContextPreference = .standard) -> Int {
+            ModelRuntimePolicyProvider.policy(
+                for: .gemma4E2B,
+                systemMemoryBytes: 36.gibibytes,
+                preference: preference,
+                architecture: architecture,
+                prefillTokensPerSecond: speed
+            ).contextTokens
+        }
 
-        #expect(PromptPacker.promptBudget(for: e2B, resourceKind: .summary) == 2_048)
-        #expect(PromptPacker.promptBudget(for: e2B, resourceKind: .quiz) == 2_048)
-        #expect(PromptPacker.promptBudget(for: e4B, resourceKind: .summary) == 682)
-        #expect(PromptPacker.promptBudget(for: e4B, resourceKind: .quiz) == 682)
+        #expect(context(1_000) == 24_576)
+        #expect(context(4_000) == 99_328)
+        #expect(context(1_000) < context(4_000))
+        #expect(context(1_000, .extended) == 131_072)
+    }
+
+    @Test
+    func contextWindowNeverExceedsModelLimitOrMemoryFit() {
+        let architecture = ModelArchitecture.catalogEstimate(for: .gemma4E2B)
+        let policy = ModelRuntimePolicyProvider.policy(for: .gemma4E2B, systemMemoryBytes: 128.gibibytes, preference: .extended, architecture: architecture)
+        #expect(policy.contextTokens == architecture.nativeContextTokens)
+
+        let e4b = ModelArchitecture.catalogEstimate(for: .gemma4E4B)
+        let fit = ContextBudget.memoryFit(for: .gemma4E4B, architecture: e4b, workingSetBytes: ContextBudget.workingSetBytes(forSystemMemory: 8.gibibytes))
+        let tight = ContextBudget.contextTokens(for: .gemma4E4B, systemMemoryBytes: 8.gibibytes, preference: .extended, architecture: e4b)
+        #expect(tight <= max(ContextBudget.minimumContextTokens, fit))
+    }
+
+    @Test
+    func architectureReadsKVCostFromGemma4Config() throws {
+        let config: [String: Any] = ["text_config": [
+            "num_hidden_layers": 35,
+            "num_key_value_heads": 1,
+            "num_attention_heads": 8,
+            "head_dim": 256,
+            "global_head_dim": 512,
+            "sliding_window": 512,
+            "num_kv_shared_layers": 20,
+            "max_position_embeddings": 131_072,
+            "layer_types": (0..<35).map { ($0 + 1) % 5 == 0 ? "full_attention" : "sliding_attention" }
+        ]]
+        let data = try JSONSerialization.data(withJSONObject: config)
+        let architecture = try #require(ModelArchitecture.parse(configData: data))
+
+        #expect(architecture.nativeContextTokens == 131_072)
+        #expect(architecture.kvBytesPerToken == 3 * 2 * 512 * 2)
+        #expect(architecture.fixedCacheBytes == 12 * 512 * 2 * 256 * 2)
+    }
+
+    @Test
+    func architectureIgnoresLinearAttentionLayers() throws {
+        let config = """
+        {"text_config": {"num_hidden_layers": 4, "num_key_value_heads": 4, "num_attention_heads": 16, "head_dim": 256,
+         "max_position_embeddings": 262144,
+         "layer_types": ["linear_attention", "linear_attention", "linear_attention", "full_attention"]}}
+        """
+        let architecture = try #require(ModelArchitecture.parse(configData: Data(config.utf8)))
+
+        #expect(architecture.kvBytesPerToken == 2 * 4 * 256 * 2)
+        #expect(architecture.fixedCacheBytes == 0)
+    }
+
+    @Test
+    func prefillSpeedIsSmoothedAndIgnoresTinyPrompts() throws {
+        let defaults = try #require(UserDefaults(suiteName: "PrefillSpeedStoreTests-\(UUID().uuidString)"))
+        PrefillSpeedStore.record(promptTokens: 200, seconds: 1, for: "m", defaults: defaults)
+        #expect(PrefillSpeedStore.tokensPerSecond(for: "m", defaults: defaults) == nil)
+
+        PrefillSpeedStore.record(promptTokens: 4_000, seconds: 2, for: "m", defaults: defaults)
+        #expect(PrefillSpeedStore.tokensPerSecond(for: "m", defaults: defaults) == 2_000)
+
+        PrefillSpeedStore.record(promptTokens: 4_000, seconds: 1, for: "m", defaults: defaults)
+        #expect(PrefillSpeedStore.tokensPerSecond(for: "m", defaults: defaults) == 2_600)
+    }
+
+    @Test
+    func sourceBudgetIsMuchLargerThanTheOldFixedWindow() {
+        var policy = ModelRuntimePolicyProvider.policy(for: .gemma4E4B, systemMemoryBytes: 16.gibibytes, preference: .extended)
+        policy.contextTokens = 16_384
+
+        #expect(policy.sourceTokenBudget(for: .ask) == 16_384 - 2_048 - 1_200 - 3_276 - 4 * 640)
+        #expect(policy.sourceTokenBudget(for: .summary) > policy.sourceTokenBudget(for: .ask))
+        #expect(PromptPacker.promptBudget(for: policy, resourceKind: .summary) > 682 * 10)
+    }
+
+    @Test
+    func generationParametersUseQuantizedUnboundedCache() {
+        let parameters = ModelRuntimeDefaults.vision.generateParameters()
+
+        #expect(parameters.maxKVSize == nil)
+        #expect(parameters.kvBits == 8)
+        #expect(parameters.maxTokens == ModelRuntimeDefaults.vision.maxTokens)
+        #expect(parameters.prefill.stepSize == ModelRuntimeDefaults.vision.prefillStepSize)
     }
 
     @Test
@@ -109,5 +210,50 @@ struct InferenceProfileTests {
 
         #expect(parameters.maxTokens == 128)
         #expect(parameters.temperature == 0.05)
+    }
+
+    @Test
+    func legacyInferenceAliasesRemainSourceCompatible() {
+        #expect(InferenceProfile.gemma4E2B.id == ModelProfile.gemma4E2B.id)
+        #expect(InferenceProfileCatalog.studyCatalog.map(\.id) == ModelCatalog.studyCatalog.map(\.id))
+        #expect(GenerationDefaults.vision == ModelRuntimeDefaults.vision)
+    }
+
+    @Test
+    func smallAndLargeGemmaModelsShipMultiTokenPredictionDrafters() {
+        let withDrafter = ModelProfile.studyCatalog.filter(\.supportsSpeculativeDecoding).map(\.id)
+
+        #expect(withDrafter == ["gemma4E2B", "gemma4E4B", "gemma4_12B", "gemma4_26B_A4B"])
+        #expect(!ModelProfile.qwen35_4B.supportsSpeculativeDecoding)
+        #expect(!ModelProfile.lfm25A1B8B.supportsSpeculativeDecoding)
+
+        let drafter = ModelProfile.gemma4E2B.drafterProfile
+        #expect(drafter?.kind == .drafter)
+        #expect(drafter?.modelIdentifier == "mlx-community/gemma-4-E2B-it-assistant-bf16")
+        #expect(ModelProfile.gemma4E2B.totalDownloadBytes == ModelProfile.gemma4E2B.downloadBytes + 190_000_000)
+        for profile in ModelProfile.studyCatalog {
+            #expect(!(profile.drafterRepository ?? "").localizedCaseInsensitiveContains("optiq"))
+        }
+    }
+
+    @Test
+    func drafterDirectoriesDoNotNeedTokenizerFiles() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("drafter-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(#"{"model_type":"gemma4_assistant"}"#.utf8).write(to: directory.appendingPathComponent("config.json"))
+        try Data([1, 2, 3]).write(to: directory.appendingPathComponent("model.safetensors"))
+        let drafter = try #require(ModelProfile.gemma4E4B.drafterProfile)
+
+        #expect(ManagedModelStore.isUsableModelDirectory(directory, for: drafter))
+        #expect(!ManagedModelStore.isUsableModelDirectory(directory, for: .lfm25A1B8B))
+    }
+
+    @Test
+    func pausedDownloadsDescribeTheirProgress() {
+        #expect(ModelManager.pausedMessage(fraction: 0.42) == "Paused at 42%")
+        #expect(ModelManager.pausedMessage(fraction: nil) == "Download paused")
+        #expect(PendingModelDownload(profileID: "x", writtenBytes: 50, totalBytes: 200).fraction == 0.25)
+        #expect(ModelDownloadPhase.downloading.isTransferring)
+        #expect(!ModelDownloadPhase.paused.isTransferring)
     }
 }

@@ -12,35 +12,13 @@ import UniformTypeIdentifiers
 struct LocalModelRunnerTests {
     @MainActor
     @Test
-    func firstTurnSourcePreviewOnlyShowsForEmptySessionsWithSources() {
-        let viewModel = StudyWorkspaceViewModel()
-        let sessionID = viewModel.currentSessionID
-        let sourceURL = FileManager.default.temporaryDirectory.appendingPathComponent("LocalTutorPreviewTest.md")
-        try? "Preview test notes".write(to: sourceURL, atomically: true, encoding: .utf8)
-        let source = StudySource(url: sourceURL)
-
-        viewModel.currentSession = StudySession(id: sessionID, sources: [], turns: [])
-        #expect(viewModel.shouldShowFirstTurnSourcePreview == false)
-
-        viewModel.currentSession = StudySession(id: sessionID, sources: [source], turns: [])
-        #expect(viewModel.shouldShowFirstTurnSourcePreview == true)
-
-        let user = StudyTurnUser(
-            focus: "What should I study?",
-            resourceKind: .ask,
-            sources: [source],
-            isRefinement: false
-        )
-        viewModel.currentSession = StudySession(id: sessionID, sources: [source], turns: [StudyTurn(user: user)])
-        #expect(viewModel.shouldShowFirstTurnSourcePreview == false)
-    }
-
-    @MainActor
-    @Test
     func textOnlyImportRejectsImagesButKeepsDocuments() throws {
-        let viewModel = StudyWorkspaceViewModel()
-        let sessionID = viewModel.currentSessionID
-        viewModel.currentSession = StudySession(id: sessionID, sources: [], turns: [])
+        let notebook = Notebook(title: "Imports")
+        let store = NotebookStore(persistence: nil, initial: [notebook])
+        let models = ModelManager(inferenceService: NoopInferenceService(), cacheInfoProvider: { _ in [:] })
+        let library = SourceLibrary(store: store, models: models)
+        var reported: String?
+        library.onError = { reported = $0 }
 
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("LocalTutorImportTests-\(UUID().uuidString)", isDirectory: true)
@@ -50,17 +28,34 @@ struct LocalModelRunnerTests {
         try "Readable notes".write(to: notesURL, atomically: true, encoding: .utf8)
         try Data().write(to: imageURL)
 
-        viewModel.importURLs([notesURL, imageURL], supportsVision: false)
+        library.importURLs([notesURL, imageURL], into: notebook.id, supportsVision: false)
 
-        #expect(viewModel.sources.map(\.displayName) == ["notes.md"])
-        #expect(viewModel.globalError == "Images require a vision model.")
+        #expect(store.notebook(notebook.id)?.sources.map(\.displayName) == ["notes.md"])
+        #expect(reported?.contains("vision model") == true)
         #expect(StudySource.supportedContentTypes(supportsVision: false).contains(.image) == false)
         #expect(StudySource.supportedContentTypes(supportsVision: true).contains(.image))
     }
 
     @MainActor
     @Test
-    func removingSelectedDownloadedModelClearsSelectionAndDisablesSend() {
+    func importingIntoUntitledNotebookNamesItAfterTheFirstFile() throws {
+        let notebook = Notebook()
+        let store = NotebookStore(persistence: nil, initial: [notebook])
+        let library = SourceLibrary(
+            store: store,
+            models: ModelManager(inferenceService: NoopInferenceService(), cacheInfoProvider: { _ in [:] })
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cell_biology-week3.md")
+        try "Cells".write(to: url, atomically: true, encoding: .utf8)
+
+        library.importURLs([url], into: notebook.id, supportsVision: true)
+
+        #expect(store.notebook(notebook.id)?.title == "cell biology week3")
+    }
+
+    @MainActor
+    @Test
+    func removingSelectedDownloadedModelClearsSelectionAndDisablesSend() async {
         let previousProfileID = UserDefaults.standard.string(forKey: AppStorageKeys.selectedProfileID)
         defer {
             if let previousProfileID {
@@ -71,7 +66,9 @@ struct LocalModelRunnerTests {
         }
 
         UserDefaults.standard.removeObject(forKey: AppStorageKeys.selectedProfileID)
-        let viewModel = StudyWorkspaceViewModel(
+        let notebook = Notebook(title: "Chat")
+        let store = NotebookStore(persistence: nil, initial: [notebook])
+        let models = ModelManager(
             inferenceService: NoopInferenceService(),
             cacheInfoProvider: { profiles in
                 Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, ModelCacheInfo.empty) })
@@ -80,43 +77,99 @@ struct LocalModelRunnerTests {
                 ModelCacheRemovalResult(removedByteCount: 0)
             }
         )
-        viewModel.setActiveProfile(.gemma4E2B)
-        viewModel.composerText = "Summarize this"
+        let chat = ChatController(store: store, models: models)
+        models.select(.gemma4E2B, preload: false)
+        chat.composerText = "Summarize this"
 
-        #expect(viewModel.selectedProfile?.id == ModelProfile.gemma4E2B.id)
-        #expect(viewModel.canSend)
+        #expect(models.selectedProfile?.id == ModelProfile.gemma4E2B.id)
+        #expect(chat.canSend(in: notebook))
 
-        viewModel.removeCachedModel(.gemma4E2B)
+        models.remove(.gemma4E2B)
 
-        #expect(viewModel.selectedProfile == nil)
-        #expect(viewModel.canSend == false)
+        #expect(models.selectedProfile == nil)
+        #expect(chat.canSend(in: notebook) == false)
     }
 
     @Test
-    func runnerRefusesConcurrentRuns() async {
-        let runner = LocalModelRunner()
-        await runner.setRunningForTesting(true)
+    func generationGateQueuesInsteadOfRejecting() async {
+        let gate = GenerationGate()
+        await gate.acquire()
+        #expect(await gate.isOccupied)
 
-        do {
-            _ = try await runner.run(
-                profile: .gemma4E2B,
-                prompt: "Hello",
-                imageURL: nil,
-                events: { _ in }
-            )
-            Issue.record("Expected busy error")
-        } catch let error as LocalModelRunnerError {
-            #expect(error.localizedDescription == LocalModelRunnerError.busy.localizedDescription)
-        } catch {
-            Issue.record("Unexpected error: \(error)")
+        let second = Task {
+            await gate.acquire()
+            return true
         }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(await gate.queuedCount == 1)
+
+        await gate.release()
+        #expect(await second.value)
+        #expect(await gate.isOccupied)
+        await gate.release()
+        #expect(await gate.isOccupied == false)
     }
 
     @Test
-    func interactiveOutputDoesNotReplaceStructuredProgressStatus() {
-        #expect(StudyWorkspaceViewModel.immediateOutputStatus(for: .quiz) == nil)
-        #expect(StudyWorkspaceViewModel.immediateOutputStatus(for: .flashcards) == nil)
-        #expect(StudyWorkspaceViewModel.immediateOutputStatus(for: .summary) == "Writing answer")
+    func structuredProgressCountsItemsAsTheyStream() {
+        #expect(StudioController.structuredProgress(kind: .quiz, raw: "{\"title\":\"Q\"") == "Composing quiz")
+        #expect(StudioController.structuredProgress(kind: .quiz, raw: #"{"questions":[{"prompt":"a"},{"prompt":"b"#) == "Writing question 2")
+        #expect(StudioController.structuredProgress(kind: .flashcards, raw: #"{"cards":[{"front":"x"#) == "Writing card 1")
+    }
+
+    @Test
+    func performanceSummaryReportsReusedTokens() {
+        let record = BenchmarkRecord(
+            schemaVersion: BenchmarkRecord.schemaVersion,
+            id: UUID(),
+            startedAt: Date(),
+            endedAt: Date(),
+            appVersion: "test",
+            device: .current,
+            profileID: "p",
+            profileName: "P",
+            modelID: "m",
+            kind: "text",
+            tier: "eightGB",
+            prompt: "",
+            imageFilename: nil,
+            imageFilenames: [],
+            includedImageCount: 0,
+            omittedImageCount: 0,
+            timing: BenchmarkTiming(downloadSeconds: 0, loadSeconds: 0, firstTokenSeconds: 0.42, wallSeconds: 2),
+            tokenMetrics: BenchmarkTokenMetrics(
+                promptTokens: 20,
+                generatedTokens: 100,
+                promptTimeSeconds: 0.1,
+                generationTimeSeconds: 2,
+                tokensPerSecond: 51.2,
+                stopReason: "stop",
+                cachedPromptTokens: 9_000
+            ),
+            mlxMemoryBefore: nil,
+            mlxMemoryAfter: nil,
+            processPeakPhysicalFootprintBytes: nil,
+            status: .success,
+            errorMessage: nil,
+            output: "Hi"
+        )
+
+        let summary = ChatController.performanceSummary(record)
+        #expect(summary.contains("51 tok/s"))
+        #expect(summary.contains("first token 0.4s"))
+        #expect(summary.contains("tokens reused"))
+    }
+
+    @Test
+    func chatHistoryTrimsOldestTurnsToFitTheWindow() {
+        let long = String(repeating: "word ", count: 400)
+        let history = (0..<6).map { ChatHistoryMessage(question: "Q\($0) " + long, answer: "A\($0) " + long) }
+
+        let kept = LocalModelRunner.trimmedHistory(history, instructions: "rules", incomingTokens: 50, limit: 1_500)
+
+        #expect(!kept.isEmpty)
+        #expect(kept.count < history.count)
+        #expect(kept.last == history.last)
     }
 
     @Test
@@ -571,6 +624,21 @@ private struct NoopInferenceService: InferenceService {
         throw CancellationError()
     }
 
+    func chat(
+        request _: ChatInferenceRequest,
+        events _: nonisolated(nonsending) @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws -> BenchmarkRecord {
+        throw CancellationError()
+    }
+
+    func generateStructured(
+        request _: InferenceRequest,
+        jsonSchema _: String,
+        events _: nonisolated(nonsending) @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws -> BenchmarkRecord {
+        throw CancellationError()
+    }
+
     func preload(
         profile _: ModelProfile,
         runtimePolicy _: ModelRuntimePolicy,
@@ -578,6 +646,10 @@ private struct NoopInferenceService: InferenceService {
     ) async throws {}
 
     func unload() async {}
+
+    func releaseConversations() async {}
+
+    func setSpeculativeDecoding(_: Bool) async {}
 
     func clearCache() async throws {}
 }

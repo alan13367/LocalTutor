@@ -49,6 +49,10 @@ struct BenchmarkTokenMetrics: Codable, Equatable, Sendable {
     var generationTimeSeconds: Double?
     var tokensPerSecond: Double?
     var stopReason: String?
+    var cachedPromptTokens: Int? = nil
+    var proposedDraftTokens: Int? = nil
+    var acceptedDraftTokens: Int? = nil
+    var speculativePassthroughReason: String? = nil
 }
 
 struct BenchmarkRecord: Codable, Identifiable, Equatable, Sendable {

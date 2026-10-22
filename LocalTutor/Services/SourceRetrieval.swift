@@ -14,6 +14,7 @@ struct SourcePromptContext: Sendable {
     var omittedImageCount: Int
     var imageFilenames: [String]
     var omittedTextChunkCount: Int
+    var citations: [SourceCitation] = []
 }
 
 struct SourceRetrievalResult: Sendable {
@@ -643,11 +644,11 @@ enum SourceContextRenderer {
         supportsVision: Bool = true,
         extraWarnings: [String] = []
     ) -> SourcePromptContext {
-        var blocks = chunks.map { chunk in
-            StudyPromptContent.Block.text("""
-            === \(chunk.displayLocator) ===
-            \(chunk.text)
-            """)
+        let citations = chunks.enumerated().map { offset, chunk in
+            SourceCitation(index: offset + 1, chunk: chunk)
+        }
+        var blocks = chunks.enumerated().map { offset, chunk in
+            StudyPromptContent.Block.text(numberedExcerpt(chunk, index: offset + 1))
         }
 
         var includedImages = 0
@@ -683,7 +684,15 @@ enum SourceContextRenderer {
             includedImageCount: includedImages,
             omittedImageCount: omittedImages,
             imageFilenames: imageFilenames,
-            omittedTextChunkCount: omittedTextChunkCount
+            omittedTextChunkCount: omittedTextChunkCount,
+            citations: citations
         )
+    }
+
+    static func numberedExcerpt(_ chunk: SourceChunk, index: Int) -> String {
+        """
+        [\(index)] \(chunk.displayLocator)
+        \(chunk.text)
+        """
     }
 }

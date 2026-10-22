@@ -96,7 +96,7 @@ actor SQLiteSourceIndexRepository: SourceIndexRepository {
                     .text(index.sourceKind.rawValue),
                     .blob(try encoder.encode(index.warnings)),
                     .integer(Int64(SourceIndex.schemaVersion)),
-                    .text(ModelCatalog.embeddingGemma300M.modelIdentifier),
+                    .text(ModelCatalog.embeddingModel.modelIdentifier),
                     .integer(Int64(LocalEmbeddingRunner.promptVersion)),
                     .integer(Int64(LocalEmbeddingRunner.dimension)),
                     .text(state.rawValue)
@@ -209,7 +209,7 @@ actor SQLiteSourceIndexRepository: SourceIndexRepository {
               AND v.model_id = ? AND v.prompt_version = ? AND v.dimension = ?
             """
         let bindings = keys.map(SQLiteBinding.text) + [
-            .text(ModelCatalog.embeddingGemma300M.modelIdentifier),
+            .text(ModelCatalog.embeddingModel.modelIdentifier),
             .integer(Int64(LocalEmbeddingRunner.promptVersion)),
             .integer(Int64(LocalEmbeddingRunner.dimension))
         ]
@@ -239,7 +239,7 @@ actor SQLiteSourceIndexRepository: SourceIndexRepository {
                     """,
                     bindings: [
                         .text(chunkID),
-                        .text(ModelCatalog.embeddingGemma300M.modelIdentifier),
+                        .text(ModelCatalog.embeddingModel.modelIdentifier),
                         .integer(Int64(LocalEmbeddingRunner.promptVersion)),
                         .integer(Int64(vector.count)),
                         .blob(Data(floatArray: vector))
@@ -254,7 +254,7 @@ actor SQLiteSourceIndexRepository: SourceIndexRepository {
                 """,
                 bindings: [
                     .text(SourceIndexState.ready.rawValue),
-                    .text(ModelCatalog.embeddingGemma300M.modelIdentifier),
+                    .text(ModelCatalog.embeddingModel.modelIdentifier),
                     .integer(Int64(LocalEmbeddingRunner.promptVersion)),
                     .integer(Int64(LocalEmbeddingRunner.dimension)),
                     .text(fingerprint.cacheKey)

@@ -19,6 +19,7 @@ struct StudyPromptContent: Sendable {
     var omittedImageCount: Int
     var imageFilenames: [String]
     var warnings: [String]
+    var citations: [SourceCitation] = []
 
     var benchmarkText: String {
         var parts: [String] = [

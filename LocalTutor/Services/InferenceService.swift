@@ -27,9 +27,37 @@ struct InferenceRequest: Sendable {
     }
 }
 
+struct ChatHistoryMessage: Sendable, Equatable {
+    var question: String
+    var answer: String
+}
+
+struct ChatInferenceRequest: Sendable {
+    var profile: ModelProfile
+    var runtimePolicy: ModelRuntimePolicy
+    var conversationID: UUID
+    var instructions: String
+    var history: [ChatHistoryMessage]
+    var message: String
+    var images: [DocumentImage]
+    var maxTokens: Int?
+    var temperature: Float?
+}
+
 protocol InferenceService: Sendable {
     func run(
         request: InferenceRequest,
+        events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws -> BenchmarkRecord
+
+    func chat(
+        request: ChatInferenceRequest,
+        events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws -> BenchmarkRecord
+
+    func generateStructured(
+        request: InferenceRequest,
+        jsonSchema: String,
         events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
     ) async throws -> BenchmarkRecord
 
@@ -40,6 +68,10 @@ protocol InferenceService: Sendable {
     ) async throws
 
     func unload() async
+
+    func releaseConversations() async
+
+    func setSpeculativeDecoding(_ enabled: Bool) async
 
     func clearCache() async throws
 }

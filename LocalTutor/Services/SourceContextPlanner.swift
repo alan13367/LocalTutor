@@ -96,12 +96,7 @@ enum SourceContextPlanner {
     static func shouldUseWholeDocument(user: StudyTurnUser) -> Bool {
         let hasFocus = !user.focus.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard !hasFocus else { return false }
-        switch user.resourceKind {
-        case .summary, .beginnerExplanation, .cheatSheet, .flashcards, .quiz:
-            return true
-        case .ask:
-            return false
-        }
+        return user.resourceKind != .ask
     }
 
     static func sectionGroups(for chunks: [SourceChunk], budget: Int) -> [[SourceChunk]] {
@@ -159,7 +154,7 @@ enum SourceContextPlanner {
         return groups
     }
 
-    private static func prepareSources(
+    static func prepareSources(
         _ sources: [StudySource],
         runtimePolicy: ModelRuntimePolicy,
         status: StatusHandler

@@ -2,211 +2,173 @@
 //  FlashcardPlayerView.swift
 //  LocalTutor
 //
-//  Interactive flashcard deck powered by a FlashcardDeck payload.
-//
 
 import SwiftUI
 
 struct FlashcardPlayerView: View {
-    let deck: FlashcardDeck
+    let title: String
+    let cards: [Flashcard]
+    let reviewStates: [String: FlashcardReviewState]
+    var onGrade: (String, ReviewGrade) -> Void
 
-    @State private var currentIndex = 0
+    @State private var queue: [Flashcard] = []
     @State private var isFlipped = false
-    @State private var known: Set<String> = []
-    @State private var againPile: [String] = []
-    @State private var sessionFinished = false
-
-    private var orderedCards: [Flashcard] { deck.cards }
+    @State private var reviewed = 0
+    @State private var gradeCounts: [ReviewGrade: Int] = [:]
+    @State private var started = false
+    @FocusState private var isFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             header
-
-            if sessionFinished {
-                resultsView
-            } else if !orderedCards.isEmpty {
-                cardView
-                controls
+            if let card = queue.first {
+                FlashcardFace(card: card, isFlipped: isFlipped)
+                    .frame(minHeight: 240)
+                    .contentShape(Rectangle())
+                    .onTapGesture { flip() }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint(isFlipped ? "Grade this card" : "Flip to see the answer")
+                controls(for: card)
+            } else if started {
+                results
             }
+        }
+        .focusable()
+        .focused($isFocused)
+        .focusEffectDisabled()
+        .onKeyPress(.space) {
+            flip()
+            return .handled
+        }
+        .onKeyPress(characters: CharacterSet(charactersIn: "1234")) { press in
+            guard isFlipped, let card = queue.first,
+                  let grade = ReviewGrade.allCases.first(where: { String($0.keyboardKey) == press.characters }) else {
+                return .ignored
+            }
+            record(card, grade)
+            return .handled
+        }
+        .onAppear {
+            if !started {
+                queue = cards
+                started = true
+            }
+            isFocused = true
         }
     }
 
     private var header: some View {
-        VStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(deck.title ?? "Flashcards")
+                    Text(title)
                         .font(.headline)
-                    if !sessionFinished {
-                        Text("Card \(min(currentIndex + 1, orderedCards.count)) of \(orderedCards.count)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(queue.isEmpty ? "Session complete" : "\(queue.count) left · \(reviewed) reviewed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
-                HStack(spacing: 8) {
-                    Label("\(known.count)", systemImage: "checkmark.seal.fill")
-                        .font(.caption.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(.green)
-                    Label("\(againPile.count)", systemImage: "arrow.uturn.left")
-                        .font(.caption.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(.orange)
-                }
+                Text("Space to flip · 1–4 to grade")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
-
-            ProgressView(value: progressFraction)
-                .progressViewStyle(.linear)
+            ProgressView(value: Double(reviewed), total: Double(max(1, reviewed + queue.count)))
                 .tint(Color.accentColor)
         }
     }
 
-    private var progressFraction: Double {
-        guard !orderedCards.isEmpty else { return 0 }
-        if sessionFinished { return 1 }
-        return Double(known.count + againPile.count) / Double(orderedCards.count)
-    }
-
-    private var card: Flashcard? {
-        guard !orderedCards.isEmpty, currentIndex < orderedCards.count else { return nil }
-        return orderedCards[currentIndex]
-    }
-
     @ViewBuilder
-    private var cardView: some View {
-        if let card {
-            FlashcardFace(card: card, isFlipped: isFlipped)
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: 220)
-                .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .onTapGesture {
-                    withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
-                        isFlipped.toggle()
-                    }
-                }
-        }
-    }
-
-    private var controls: some View {
-        HStack(spacing: 10) {
-            if !isFlipped {
-                Button {
-                    withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
-                        isFlipped = true
-                    }
-                } label: {
-                    Label("Show answer", systemImage: "rectangle.portrait.and.arrow.right")
-                }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-            } else {
-                Button {
-                    grade(known: false)
-                } label: {
-                    Label("Again", systemImage: "arrow.uturn.left")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .tint(.orange)
-
-                Button {
-                    grade(known: true)
-                } label: {
-                    Label("Got it", systemImage: "checkmark.seal.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-            }
-        }
-    }
-
-    private var resultsView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(Color.accentColor.opacity(0.16))
-                        .frame(width: 56, height: 56)
-                    Image(systemName: "rectangle.stack.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Session complete")
-                        .font(.title3.weight(.semibold))
-                    Text("\(known.count) of \(orderedCards.count) marked as known")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-
-            HStack(spacing: 10) {
-                Button {
-                    restart(onlyAgain: false)
-                } label: {
-                    Label("Restart deck", systemImage: "arrow.counterclockwise")
-                }
-                .buttonStyle(.bordered)
-
-                if !againPile.isEmpty {
+    private func controls(for card: Flashcard) -> some View {
+        if isFlipped {
+            let state = reviewStates[card.id] ?? .new(cardID: card.id)
+            HStack(spacing: 8) {
+                ForEach(ReviewGrade.allCases) { grade in
                     Button {
-                        restart(onlyAgain: true)
+                        record(card, grade)
                     } label: {
-                        Label("Drill missed (\(againPile.count))", systemImage: "flame")
+                        VStack(spacing: 2) {
+                            Text(grade.title)
+                                .font(.callout.weight(.semibold))
+                            Text(SpacedRepetition.intervalDescription(for: state, grade: grade))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glass)
+                    .tint(tint(for: grade))
+                    .accessibilityLabel("\(grade.title), next review in \(SpacedRepetition.intervalDescription(for: state, grade: grade))")
                 }
             }
+        } else {
+            Button {
+                flip()
+            } label: {
+                Text("Show Answer")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.glassProminent)
         }
     }
 
-    // MARK: Actions
-
-    private func grade(known isKnown: Bool) {
-        guard let card else { return }
-        if isKnown {
-            known.insert(card.id)
-            againPile.removeAll { $0 == card.id }
-        } else {
-            if !againPile.contains(card.id) { againPile.append(card.id) }
-        }
-        advance()
-    }
-
-    private func advance() {
-        if currentIndex >= orderedCards.count - 1 {
-            sessionFinished = true
-        } else {
-            currentIndex += 1
-            withAnimation(.easeInOut(duration: 0.18)) {
+    private var results: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.green)
+                .accessibilityHidden(true)
+            Text("Nice work: \(reviewed) review\(reviewed == 1 ? "" : "s")")
+                .font(.title3.weight(.semibold))
+            HStack(spacing: 14) {
+                ForEach(ReviewGrade.allCases) { grade in
+                    Label("\(gradeCounts[grade, default: 0]) \(grade.title)", systemImage: "circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(tint(for: grade))
+                }
+            }
+            Text("Cards are scheduled for future review automatically.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Practice Again") {
+                queue = cards
+                reviewed = 0
+                gradeCounts = [:]
                 isFlipped = false
             }
+            .buttonStyle(.glass)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+    }
+
+    private func flip() {
+        guard !queue.isEmpty else { return }
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) {
+            isFlipped.toggle()
         }
     }
 
-    private func restart(onlyAgain: Bool) {
-        if onlyAgain {
-            let drillIDs = Set(againPile)
-            // Move the again pile to the front of the iteration order.
-            let drillCards = deck.cards.filter { drillIDs.contains($0.id) }
-            // We just iterate them directly by resetting state to start over.
-            // Replace order by simulating a "filtered deck" via known seeding.
-            known = Set(deck.cards.map(\.id)).subtracting(drillIDs)
-            againPile = []
-            currentIndex = deck.cards.firstIndex(where: { drillIDs.contains($0.id) }) ?? 0
-            // Walk to first drill card that isn't known.
-            while currentIndex < deck.cards.count, known.contains(deck.cards[currentIndex].id) {
-                currentIndex += 1
-            }
-            sessionFinished = drillCards.isEmpty
-        } else {
-            known.removeAll()
-            againPile.removeAll()
-            currentIndex = 0
-            sessionFinished = false
+    private func record(_ card: Flashcard, _ grade: ReviewGrade) {
+        onGrade(card.id, grade)
+        reviewed += 1
+        gradeCounts[grade, default: 0] += 1
+        queue.removeFirst()
+        if grade == .again {
+            queue.append(card)
         }
         isFlipped = false
+    }
+
+    private func tint(for grade: ReviewGrade) -> Color {
+        switch grade {
+        case .again: .red
+        case .hard: .orange
+        case .good: .green
+        case .easy: .blue
+        }
     }
 }
 
@@ -216,18 +178,17 @@ private struct FlashcardFace: View {
 
     var body: some View {
         ZStack {
-            face(text: card.front, kind: "Front", visible: !isFlipped)
+            face(text: card.front, kind: "Question")
                 .rotation3DEffect(.degrees(isFlipped ? 180 : 0), axis: (x: 0, y: 1, z: 0))
                 .opacity(isFlipped ? 0 : 1)
-            face(text: card.back, kind: "Back", visible: isFlipped)
+            face(text: card.back, kind: "Answer")
                 .rotation3DEffect(.degrees(isFlipped ? 0 : -180), axis: (x: 0, y: 1, z: 0))
                 .opacity(isFlipped ? 1 : 0)
         }
-        .animation(.spring(response: 0.45, dampingFraction: 0.78), value: isFlipped)
     }
 
-    private func face(text: String, kind: String, visible _: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func face(text: String, kind: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             Text(kind.uppercased())
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(.secondary)
@@ -235,30 +196,15 @@ private struct FlashcardFace: View {
                 .padding(.vertical, 3)
                 .background(Capsule().fill(Color.primary.opacity(0.06)))
             Spacer(minLength: 0)
-            Text(text)
-                .font(.title3.weight(.medium))
+            Text(InlineLatexRenderer.render(text))
+                .font(.title2.weight(.medium))
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
             Spacer(minLength: 0)
-            Text("Tap to flip")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(LinearGradient(
-                    colors: [Color.accentColor.opacity(0.10), Color.accentColor.opacity(0.04)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(0.25), lineWidth: 0.8)
-        )
-        .shadow(color: Color.black.opacity(0.06), radius: 10, x: 0, y: 4)
+        .padding(24)
+        .frame(maxWidth: .infinity, minHeight: 240, alignment: .leading)
+        .glassEffect(.regular.tint(Color.accentColor.opacity(0.08)), in: .rect(cornerRadius: 20))
     }
 }

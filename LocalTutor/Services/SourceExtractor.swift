@@ -97,9 +97,15 @@ enum SourceExtractor {
             if shouldUseCache(for: source, options: sourceOptions),
                let cached = await SourceExtractionCache.shared.cached(for: source) {
                 extracted = cached
+            } else if !shouldUseCache(for: source, options: sourceOptions),
+                      let cached = await SourceExtractionCache.shared.cachedVisual(for: source, imageLimit: sourceOptions.imageLimit) {
+                extracted = cached
             } else {
                 extracted = await extractOne(source, options: sourceOptions)
                 if shouldUseCache(for: source, options: sourceOptions) {
+                    await SourceExtractionCache.shared.store(extracted.textOnlyCacheCopy, for: source)
+                } else {
+                    await SourceExtractionCache.shared.storeVisual(extracted, for: source, imageLimit: sourceOptions.imageLimit)
                     await SourceExtractionCache.shared.store(extracted.textOnlyCacheCopy, for: source)
                 }
             }
@@ -168,6 +174,12 @@ enum SourceExtractor {
             switch source.fileExtension {
             case "docx":
                 return try readDocx(url, source: source, options: options)
+            case "html", "htm", "xhtml":
+                return textSource(source, text: MarkupTextExtractor.plainText(fromHTML: try readPlainText(url)))
+            case "webarchive":
+                return textSource(source, text: try MarkupTextExtractor.plainText(fromWebArchiveAt: url))
+            case "epub":
+                return textSource(source, text: try MarkupTextExtractor.plainText(fromEPUBAt: url))
             case "pages":
                 if let preview = try await readIWorkPreview(url, source: source, options: options) {
                     return preview
@@ -1094,6 +1106,37 @@ actor SourceExtractionCache {
     }
 
     private var store: [String: Entry] = [:]
+    private var visualStore: [String: Entry] = [:]
+    private static let visualEntryLimit = 6
+
+    func cachedVisual(for source: StudySource, imageLimit: Int) -> ExtractedSource? {
+        let key = key(for: source) + "#images=\(imageLimit)"
+        guard var entry = visualStore[key] else { return nil }
+        if entry.modified != currentModificationDate(for: source) {
+            visualStore[key] = nil
+            return nil
+        }
+        entry.lastAccessed = Date()
+        visualStore[key] = entry
+        return entry.extracted
+    }
+
+    func storeVisual(_ extracted: ExtractedSource, for source: StudySource, imageLimit: Int) {
+        visualStore[key(for: source) + "#images=\(imageLimit)"] = Entry(
+            modified: currentModificationDate(for: source),
+            extracted: extracted,
+            lastAccessed: Date()
+        )
+        if visualStore.count > Self.visualEntryLimit,
+           let oldest = visualStore.min(by: { $0.value.lastAccessed < $1.value.lastAccessed })?.key {
+            visualStore[oldest] = nil
+        }
+    }
+
+    func removeAll() {
+        store.removeAll()
+        visualStore.removeAll()
+    }
 
     func cached(for source: StudySource) -> ExtractedSource? {
         let key = key(for: source)

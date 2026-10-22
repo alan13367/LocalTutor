@@ -1,0 +1,169 @@
+{
+  "version": 3,
+  "models": [
+    {
+      "id": "gemma4E2B",
+      "name": "Gemma 4 E2B",
+      "subtitle": "Fast multimodal tutor for every Mac",
+      "repository": "mlx-community/gemma-4-e2b-it-4bit",
+      "loader": "vlm",
+      "kind": "vision",
+      "tier": "eightGB",
+      "publisher": "Google",
+      "summary": "Compact multimodal model. Reads slides, diagrams and scanned pages, and stays responsive on 8 GB Macs.",
+      "parameterScale": "≈ 2B effective params · 4-bit MLX",
+      "strengths": [
+        "Vision",
+        "Fast on 8 GB",
+        "Multilingual"
+      ],
+      "recommended": true,
+      "downloadBytes": 3580000000,
+      "kvBytesPerToken": 6144,
+      "maxContextTokens": 131072,
+      "documentImageLimit": 2,
+      "drafterRepository": "mlx-community/gemma-4-E2B-it-assistant-bf16",
+      "drafterBytes": 190000000
+    },
+    {
+      "id": "qwen35_4B",
+      "name": "Qwen3.5 4B",
+      "subtitle": "Sharp reasoning and OCR in a small footprint",
+      "repository": "mlx-community/Qwen3.5-4B-MLX-4bit",
+      "loader": "vlm",
+      "kind": "vision",
+      "tier": "eightGB",
+      "publisher": "Alibaba",
+      "summary": "Hybrid-attention multimodal model with strong document understanding and long-context efficiency.",
+      "parameterScale": "≈ 4B params · 4-bit MLX",
+      "strengths": [
+        "Vision",
+        "OCR",
+        "Long context"
+      ],
+      "recommended": false,
+      "downloadBytes": 3060000000,
+      "kvBytesPerToken": 32768,
+      "maxContextTokens": 262144,
+      "documentImageLimit": 3,
+      "disableThinking": true
+    },
+    {
+      "id": "gemma4E4B",
+      "name": "Gemma 4 E4B",
+      "subtitle": "Balanced multimodal tutor for 16 GB Macs",
+      "repository": "mlx-community/gemma-4-e4b-it-4bit",
+      "loader": "vlm",
+      "kind": "vision",
+      "tier": "sixteenGB",
+      "publisher": "Google",
+      "summary": "The best all-round study model for 16 GB Macs: clear explanations, good vision, and fast replies.",
+      "parameterScale": "≈ 4B effective params · 4-bit MLX",
+      "strengths": [
+        "Vision",
+        "Stronger reasoning",
+        "Long context"
+      ],
+      "recommended": true,
+      "downloadBytes": 5180000000,
+      "kvBytesPerToken": 16384,
+      "maxContextTokens": 131072,
+      "documentImageLimit": 4,
+      "drafterRepository": "mlx-community/gemma-4-E4B-it-assistant-bf16",
+      "drafterBytes": 191000000
+    },
+    {
+      "id": "qwen35_9B",
+      "name": "Qwen3.5 9B",
+      "subtitle": "Deeper reasoning for dense technical material",
+      "repository": "mlx-community/Qwen3.5-9B-MLX-4bit",
+      "loader": "vlm",
+      "kind": "vision",
+      "tier": "sixteenGB",
+      "publisher": "Alibaba",
+      "summary": "Larger hybrid-attention model. Excellent for math, science and long textbooks with diagrams.",
+      "parameterScale": "≈ 9B params · 4-bit MLX",
+      "strengths": [
+        "Vision",
+        "Math & science",
+        "Long context"
+      ],
+      "recommended": false,
+      "downloadBytes": 5980000000,
+      "kvBytesPerToken": 32768,
+      "maxContextTokens": 262144,
+      "documentImageLimit": 4,
+      "disableThinking": true
+    },
+    {
+      "id": "lfm25A1B8B",
+      "name": "LFM2.5 8B-A1B",
+      "subtitle": "Very fast text-only mixture of experts",
+      "repository": "mlx-community/LFM2.5-8B-A1B-MLX-4bit",
+      "loader": "llm",
+      "kind": "text",
+      "tier": "sixteenGB",
+      "publisher": "Liquid AI",
+      "summary": "Fast text-only MoE model for summaries, explanations, flashcards and Q&A over readable source text.",
+      "parameterScale": "8.3B total / 1.5B active · 4-bit MLX",
+      "strengths": [
+        "Text-only",
+        "Very fast",
+        "Long context"
+      ],
+      "recommended": false,
+      "downloadBytes": 4782000000,
+      "kvBytesPerToken": 12288,
+      "maxContextTokens": 128000,
+      "toolCallFormat": "lfm2"
+    },
+    {
+      "id": "gemma4_12B",
+      "name": "Gemma 4 12B",
+      "subtitle": "High-quality tutor for 24 GB Macs",
+      "repository": "mlx-community/gemma-4-12B-it-4bit",
+      "loader": "vlm",
+      "kind": "vision",
+      "tier": "twentyFourGB",
+      "publisher": "Google",
+      "summary": "Noticeably stronger explanations, quizzes and study guides. Ideal for Macs with 24 GB or more.",
+      "parameterScale": "≈ 12B params · 4-bit MLX",
+      "strengths": [
+        "Vision",
+        "Best explanations",
+        "Long context"
+      ],
+      "recommended": true,
+      "downloadBytes": 6773000000,
+      "kvBytesPerToken": 16384,
+      "maxContextTokens": 262144,
+      "documentImageLimit": 6,
+      "drafterRepository": "mlx-community/gemma-4-12B-it-assistant-4bit",
+      "drafterBytes": 270000000
+    },
+    {
+      "id": "gemma4_26B_A4B",
+      "name": "Gemma 4 26B-A4B",
+      "subtitle": "Flagship mixture of experts for 32 GB+ Macs",
+      "repository": "mlx-community/gemma-4-26b-a4b-it-4bit",
+      "loader": "vlm",
+      "kind": "vision",
+      "tier": "thirtyTwoGB",
+      "publisher": "Google",
+      "summary": "26B-parameter MoE with only 4B active per token: near-flagship quality at small-model speed.",
+      "parameterScale": "26B total / 4B active · 4-bit MLX",
+      "strengths": [
+        "Vision",
+        "Flagship quality",
+        "Fast MoE"
+      ],
+      "recommended": true,
+      "downloadBytes": 15370000000,
+      "kvBytesPerToken": 20480,
+      "maxContextTokens": 262144,
+      "documentImageLimit": 8,
+      "drafterRepository": "mlx-community/gemma-4-26B-A4B-it-assistant-bf16",
+      "drafterBytes": 872000000
+    }
+  ]
+}

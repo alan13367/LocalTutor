@@ -33,6 +33,17 @@ enum SystemInfo {
         "unknown"
         #endif
     }
+
+    static var chipName: String {
+        var size = 0
+        sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0)
+        guard size > 0 else { return "Apple silicon" }
+        var buffer = [CChar](repeating: 0, count: size)
+        sysctlbyname("machdep.cpu.brand_string", &buffer, &size, nil, 0)
+        let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        let name = String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? "Apple silicon" : name
+    }
 }
 
 extension UInt64 {

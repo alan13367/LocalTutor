@@ -50,6 +50,17 @@ struct ModelDownloadFileState: Codable, Identifiable, Sendable {
     var lastErrorMessage: String?
 }
 
+struct PendingModelDownload: Equatable, Sendable {
+    var profileID: String
+    var writtenBytes: Int64
+    var totalBytes: Int64?
+
+    var fraction: Double? {
+        guard let totalBytes, totalBytes > 0 else { return nil }
+        return min(1, Double(writtenBytes) / Double(totalBytes))
+    }
+}
+
 struct ManagedModelDownloadResult: Sendable {
     var directory: URL
     var downloadSeconds: Double
@@ -216,9 +227,44 @@ actor ManagedModelDownloadService {
         } catch is CancellationError {
             markQueuedAfterCancellation(modelID: profile.id)
             throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            markQueuedAfterCancellation(modelID: profile.id)
+            throw CancellationError()
         } catch {
             failJob(modelID: profile.id, error: error)
             throw error
+        }
+    }
+
+    func pendingDownloads() -> [PendingModelDownload] {
+        jobsByProfileID.values.map { job in
+            let written = job.files.reduce(Int64(0)) { total, file in
+                if file.status == .completed {
+                    return total + (file.expectedBytes ?? file.writtenBytes)
+                }
+                return total + fileSizeIfExists(
+                    at: Self.partialFileURL(modelID: job.id, relativePath: file.relativePath, stagingDirectory: stagingDirectory)
+                )
+            }
+            return PendingModelDownload(profileID: job.id, writtenBytes: written, totalBytes: totalBytesExpected(for: job))
+        }
+    }
+
+    func discardDownload(profile: ModelProfile) {
+        let profileIDs = [profile.id] + (profile.drafterProfile.map { [$0.id] } ?? [])
+        for profileID in profileIDs {
+            if let job = jobsByProfileID.removeValue(forKey: profileID) {
+                for file in job.files {
+                    try? fileManager.removeItem(
+                        at: Self.partialFileURL(modelID: profileID, relativePath: file.relativePath, stagingDirectory: stagingDirectory)
+                    )
+                }
+            }
+        }
+        savePersistedJobs()
+        let directory = ManagedModelStore.repositoryDirectory(for: profile.modelIdentifier, repositoriesDirectory: repositoriesDirectory)
+        if !ManagedModelStore.isUsableModelDirectory(directory, for: profile, fileManager: fileManager) {
+            try? fileManager.removeItem(at: directory)
         }
     }
 
@@ -242,20 +288,26 @@ actor ManagedModelDownloadService {
         revision: String,
         requestedGlobs: [String]
     ) async throws -> ModelDownloadJob {
-        let filenames = try await fetchRepositoryFilenames(
+        let listing = try await fetchRepositoryFilenames(
             modelIdentifier: profile.modelIdentifier,
             displayName: profile.name,
             globs: Self.effectiveGlobs(requestedGlobs)
         )
+        let filenames = listing.map(\.name)
         guard !filenames.isEmpty else {
             throw ManagedModelDownloadError.emptyRepository(profile.name)
         }
 
-        let expectedBytesByFile = await fetchExpectedBytes(
-            for: filenames,
-            modelIdentifier: profile.modelIdentifier,
-            revision: revision
-        )
+        var expectedBytesByFile: [String: Int64?] = Dictionary(uniqueKeysWithValues: listing.map { ($0.name, $0.size) })
+        let unsized = listing.filter { $0.size == nil }.map(\.name)
+        if !unsized.isEmpty {
+            let fetched = await fetchExpectedBytes(
+                for: unsized,
+                modelIdentifier: profile.modelIdentifier,
+                revision: revision
+            )
+            expectedBytesByFile.merge(fetched) { _, new in new }
+        }
         let repositoryDirectory = ManagedModelStore.repositoryDirectory(
             for: profile.modelIdentifier,
             repositoriesDirectory: repositoriesDirectory
@@ -301,11 +353,12 @@ actor ManagedModelDownloadService {
         modelIdentifier: String,
         displayName: String,
         globs: [String]
-    ) async throws -> [String] {
+    ) async throws -> [(name: String, size: Int64?)] {
         let requestURL = hostURL
             .appending(path: "api")
             .appending(path: "models")
             .appending(path: modelIdentifier)
+            .appending(queryItems: [URLQueryItem(name: "blobs", value: "true")])
         var request = URLRequest(url: requestURL)
         request.timeoutInterval = 60
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -320,9 +373,9 @@ actor ManagedModelDownloadService {
 
             let repository = try JSONDecoder().decode(HuggingFaceRepositoryResponse.self, from: data)
             return repository.siblings
-                .map(\.rfilename)
-                .filter { ManagedModelStore.matchesAnyGlob($0, globs: globs) }
-                .sorted()
+                .filter { ManagedModelStore.matchesAnyGlob($0.rfilename, globs: globs) }
+                .sorted { $0.rfilename < $1.rfilename }
+                .map { (name: $0.rfilename, size: $0.lfs?.size ?? $0.size) }
         } catch let error as ManagedModelDownloadError {
             throw error
         } catch {
@@ -449,21 +502,33 @@ actor ManagedModelDownloadService {
                 delegateExpectedBytes: totalBytesExpected,
                 expectedFileBytes: file.expectedBytes
             )
-            let progressTotal = max(totalExpected ?? 0, completedBefore + (estimate.expectedBytes ?? 0))
+            let progressTotal = totalExpected.map { max($0, completedBefore + (estimate.expectedBytes ?? 0)) }
             let boundedWritten = estimate.writtenBytes
             Self.emitProgress(
                 completedBytes: max(0, completedBefore + boundedWritten),
-                totalBytes: progressTotal > 0 ? progressTotal : nil,
+                totalBytes: progressTotal,
                 isFinal: false,
                 progressHandler: progressHandler
             )
         }
         try fileManager.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
-        let stagedURL = stagingDirectory.appendingPathComponent(UUID().uuidString)
-        try? fileManager.removeItem(at: stagedURL)
-        _ = fileManager.createFile(atPath: stagedURL.path, contents: nil)
+        let stagedURL = Self.partialFileURL(modelID: modelID, relativePath: relativePath, stagingDirectory: stagingDirectory)
+        var resumeOffset = fileSizeIfExists(at: stagedURL)
+        if let expected = file.expectedBytes, resumeOffset > expected {
+            try? fileManager.removeItem(at: stagedURL)
+            resumeOffset = 0
+        }
+        if resumeOffset == 0 {
+            try? fileManager.removeItem(at: stagedURL)
+            _ = fileManager.createFile(atPath: stagedURL.path, contents: nil)
+        }
+        let startOffset = resumeOffset
 
-        let delegate = try ModelFileDownloadDelegate(stagedFileURL: stagedURL, onProgress: reportProgress)
+        let delegate = try ModelFileDownloadDelegate(
+            stagedFileURL: stagedURL,
+            resumeOffset: startOffset,
+            onProgress: reportProgress
+        )
         let configuration = URLSessionConfiguration.default
         configuration.waitsForConnectivity = true
         configuration.timeoutIntervalForRequest = 60 * 60
@@ -480,6 +545,9 @@ actor ManagedModelDownloadService {
         request.allowsConstrainedNetworkAccess = true
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 60 * 60
+        if startOffset > 0 {
+            request.setValue("bytes=\(startOffset)-", forHTTPHeaderField: "Range")
+        }
 
         let response: URLResponse
         let heartbeatTask = Task {
@@ -487,6 +555,7 @@ actor ManagedModelDownloadService {
                 for: session,
                 temporaryBaseline: temporaryBaseline,
                 fileManager: fileManager,
+                baseOffset: startOffset,
                 reportProgress: reportProgress
             )
         }
@@ -496,7 +565,9 @@ actor ManagedModelDownloadService {
         do {
             response = try await delegate.download(request: request, session: session)
         } catch {
-            try? fileManager.removeItem(at: stagedURL)
+            if !(error is CancellationError), (error as? URLError)?.code != .cancelled, delegate.isUnrecoverable {
+                try? fileManager.removeItem(at: stagedURL)
+            }
             throw error
         }
 
@@ -504,6 +575,9 @@ actor ManagedModelDownloadService {
             (200 ..< 300).contains(httpResponse.statusCode)
         else {
             try? fileManager.removeItem(at: stagedURL)
+            if (response as? HTTPURLResponse)?.statusCode == 416, startOffset > 0 {
+                return try await downloadFileIfNeeded(relativePath: relativePath, modelID: modelID, progressHandler: progressHandler)
+            }
             throw ManagedModelDownloadError.badResponse(file.relativePath)
         }
 
@@ -513,6 +587,7 @@ actor ManagedModelDownloadService {
 
         let finalSize = fileSizeIfExists(at: destination)
         guard isCompleteFile(existingBytes: finalSize, expectedBytes: file.expectedBytes) else {
+            try? fileManager.removeItem(at: destination)
             throw ManagedModelDownloadError.badResponse(file.relativePath)
         }
 
@@ -543,7 +618,9 @@ actor ManagedModelDownloadService {
                 merged.files[index].expectedBytes = merged.files[index].expectedBytes ?? existingFile.expectedBytes
                 if merged.files[index].status != .completed {
                     merged.files[index].status = .pending
-                    merged.files[index].writtenBytes = 0
+                    merged.files[index].writtenBytes = fileSizeIfExists(
+                        at: Self.partialFileURL(modelID: merged.id, relativePath: relativePath, stagingDirectory: stagingDirectory)
+                    )
                 } else {
                     merged.files[index].writtenBytes = max(merged.files[index].writtenBytes, existingFile.writtenBytes)
                 }
@@ -573,7 +650,9 @@ actor ManagedModelDownloadService {
         guard var job = jobsByProfileID[modelID] else { return }
         for index in job.files.indices where job.files[index].status == .downloading || job.files[index].status == .queued {
             job.files[index].status = .pending
-            job.files[index].writtenBytes = 0
+            job.files[index].writtenBytes = fileSizeIfExists(
+                at: Self.partialFileURL(modelID: modelID, relativePath: job.files[index].relativePath, stagingDirectory: stagingDirectory)
+            )
         }
         job.status = .queued
         job.updatedAt = Date()
@@ -687,9 +766,14 @@ actor ManagedModelDownloadService {
 
     private static func cleanupStagingDirectory(fileManager: FileManager, stagingDirectory: URL) {
         let entries = (try? fileManager.contentsOfDirectory(at: stagingDirectory, includingPropertiesForKeys: nil)) ?? []
-        for entry in entries {
+        for entry in entries where entry.pathExtension != "partial" {
             try? fileManager.removeItem(at: entry)
         }
+    }
+
+    nonisolated static func partialFileURL(modelID: String, relativePath: String, stagingDirectory: URL) -> URL {
+        let safePath = relativePath.replacingOccurrences(of: "/", with: "__")
+        return stagingDirectory.appendingPathComponent("\(modelID)--\(safePath).partial", isDirectory: false)
     }
 
     private static func effectiveGlobs(_ requestedGlobs: [String]) -> [String] {
@@ -735,6 +819,7 @@ actor ManagedModelDownloadService {
         for session: URLSession,
         temporaryBaseline: [String: Int64],
         fileManager: FileManager,
+        baseOffset: Int64,
         reportProgress: @escaping @Sendable (Int64, Int64) -> Void
     ) async {
         while !Task.isCancelled {
@@ -751,7 +836,7 @@ actor ManagedModelDownloadService {
             )
             let writtenBytes = max(taskProgress.writtenBytes, temporaryBytes)
             guard writtenBytes > 0 else { continue }
-            reportProgress(writtenBytes, taskProgress.expectedBytes)
+            reportProgress(baseOffset + writtenBytes, taskProgress.expectedBytes > 0 ? baseOffset + taskProgress.expectedBytes : 0)
         }
     }
 
@@ -871,6 +956,10 @@ enum ManagedModelStore {
             }
         }
 
+        if profile.kind == .drafter {
+            return true
+        }
+
         guard hasTokenizerFiles(in: directory, fileManager: fileManager) else {
             return false
         }
@@ -987,6 +1076,12 @@ private struct HuggingFaceRepositoryResponse: Decodable, Sendable {
 
     struct Sibling: Decodable, Sendable {
         let rfilename: String
+        let size: Int64?
+        let lfs: LFS?
+    }
+
+    struct LFS: Decodable, Sendable {
+        let size: Int64?
     }
 }
 
@@ -1001,11 +1096,15 @@ private final class ModelFileDownloadDelegate: NSObject, URLSessionDataDelegate,
     private var receivedBytes: Int64 = 0
     private var expectedBytes: Int64 = 0
     private var hasCompleted = false
+    private var baseOffset: Int64
+    private(set) var isUnrecoverable = false
 
-    init(stagedFileURL: URL, onProgress: @escaping @Sendable (Int64, Int64) -> Void) throws {
+    init(stagedFileURL: URL, resumeOffset: Int64 = 0, onProgress: @escaping @Sendable (Int64, Int64) -> Void) throws {
         self.stagedFileURL = stagedFileURL
         self.onProgress = onProgress
+        self.baseOffset = resumeOffset
         self.fileHandle = try FileHandle(forWritingTo: stagedFileURL)
+        try fileHandle?.seekToEnd()
     }
 
     func download(request: URLRequest, session: URLSession) async throws -> URLResponse {
@@ -1033,8 +1132,15 @@ private final class ModelFileDownloadDelegate: NSObject, URLSessionDataDelegate,
     ) {
         lock.lock()
         self.response = response
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 200
+        if status == 200, baseOffset > 0 {
+            try? fileHandle?.truncate(atOffset: 0)
+            baseOffset = 0
+        } else if !(200 ..< 300).contains(status) {
+            isUnrecoverable = true
+        }
         if response.expectedContentLength > 0 {
-            expectedBytes = response.expectedContentLength
+            expectedBytes = baseOffset + response.expectedContentLength
         }
         lock.unlock()
         completionHandler(.allow)
@@ -1047,8 +1153,8 @@ private final class ModelFileDownloadDelegate: NSObject, URLSessionDataDelegate,
             lock.lock()
             try fileHandle?.write(contentsOf: data)
             receivedBytes += Int64(data.count)
-            writtenBytes = receivedBytes
-            totalExpectedBytes = max(expectedBytes, dataTask.countOfBytesExpectedToReceive)
+            writtenBytes = baseOffset + receivedBytes
+            totalExpectedBytes = max(expectedBytes, baseOffset + dataTask.countOfBytesExpectedToReceive)
             lock.unlock()
         } catch {
             lock.unlock()

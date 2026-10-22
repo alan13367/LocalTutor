@@ -33,14 +33,15 @@ enum MarkdownBlock: Identifiable, Equatable {
 struct MarkdownListItem: Equatable {
     var text: AttributedString
     var level: Int
+    var number: Int? = nil
 }
 
 enum MarkdownParser {
-    static func parse(_ raw: String) -> [MarkdownBlock] {
+    static func parse(_ raw: String, startingOrdinal: Int = 0) -> [MarkdownBlock] {
         guard !raw.isEmpty else { return [] }
         var blocks: [MarkdownBlock] = []
         let lines = raw.components(separatedBy: "\n")
-        var ordinal = 0
+        var ordinal = startingOrdinal
 
         func nextID(_ kind: String) -> String {
             defer { ordinal += 1 }
@@ -214,7 +215,11 @@ enum MarkdownParser {
     private static func parseNumberedItem(_ line: String) -> MarkdownListItem? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard isNumbered(trimmed) else { return nil }
-        return MarkdownListItem(text: inlineAttributed(stripNumber(trimmed)), level: indentationLevel(in: line))
+        return MarkdownListItem(
+            text: inlineAttributed(stripNumber(trimmed)),
+            level: indentationLevel(in: line),
+            number: Int(trimmed.prefix { $0.isNumber })
+        )
     }
 
     private static func indentationLevel(in line: String) -> Int {

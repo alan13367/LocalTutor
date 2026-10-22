@@ -3,9 +3,8 @@
 //  LocalTutor
 //
 //  Streaming-safe markdown renderer using native AttributedString.
-//  Splits the text into block elements (headings, paragraphs, lists,
-//  fenced code blocks) and only re-parses at safe boundaries while
-//  the model is still streaming.
+//  Completed blocks are parsed once; only the in-progress tail is
+//  re-parsed (with unclosed inline markup healed) on each update.
 //
 
 import SwiftUI
@@ -13,52 +12,27 @@ import SwiftUI
 struct MarkdownText: View {
     let text: String
     var isStreaming: Bool = false
+    var citationCount: Int = 0
 
-    @State private var blocks: [MarkdownBlock] = []
-    @State private var lastParsedLength: Int = 0
+    @State private var renderer = MarkdownStreamRenderer()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(blocks) { block in
+            ForEach(renderer.blocks(for: text, isStreaming: isStreaming, citationCount: citationCount)) { block in
                 MarkdownBlockView(block: block)
+                    .equatable()
             }
             if isStreaming {
                 StreamingCaret()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { rebuild(force: true) }
-        .onChange(of: text) { _, _ in
-            maybeRebuild()
-        }
-        .onChange(of: isStreaming) { _, streaming in
-            if !streaming { rebuild(force: true) }
-        }
-    }
-
-    private func maybeRebuild() {
-        if !isStreaming {
-            rebuild(force: true)
-            return
-        }
-        // Only re-parse at safe boundaries to keep streaming smooth.
-        let suffix = text.suffix(6)
-        let atBoundary = suffix.contains("\n") || text.hasSuffix(". ") || text.hasSuffix("```\n") || text.hasSuffix("? ") || text.hasSuffix("! ")
-        let grewALot = text.count - lastParsedLength > 220
-        guard atBoundary || grewALot else { return }
-        rebuild(force: false)
-    }
-
-    private func rebuild(force: Bool) {
-        if !force && text.count == lastParsedLength { return }
-        blocks = MarkdownParser.parse(text)
-        lastParsedLength = text.count
     }
 }
 
 // MARK: - Block rendering
 
-private struct MarkdownBlockView: View {
+private struct MarkdownBlockView: View, Equatable {
     let block: MarkdownBlock
 
     var body: some View {
@@ -71,7 +45,7 @@ private struct MarkdownBlockView: View {
                 .textSelection(.enabled)
 
         case .paragraph(let attr, _):
-            Text(attr)
+            Text(CitationLinker.styled(attr))
                 .font(.body)
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -84,7 +58,7 @@ private struct MarkdownBlockView: View {
                         Text("•")
                             .foregroundStyle(.secondary)
                             .font(.body)
-                        Text(item.text)
+                        Text(CitationLinker.styled(item.text))
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                     }
@@ -96,10 +70,10 @@ private struct MarkdownBlockView: View {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text("\(idx + 1).")
+                        Text("\(item.number ?? idx + 1).")
                             .foregroundStyle(.secondary)
                             .font(.body.monospacedDigit())
-                        Text(item.text)
+                        Text(CitationLinker.styled(item.text))
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                     }
@@ -157,7 +131,7 @@ private struct MarkdownBlockView: View {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(Color.accentColor.opacity(0.6))
                     .frame(width: 3)
-                Text(attr)
+                Text(CitationLinker.styled(attr))
                     .italic()
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -192,7 +166,7 @@ private struct MarkdownTableCell: View {
     let isHeader: Bool
 
     var body: some View {
-        Text(text)
+        Text(CitationLinker.styled(text))
             .font(isHeader ? .callout.weight(.semibold) : .callout)
             .foregroundStyle(.primary)
             .lineLimit(nil)

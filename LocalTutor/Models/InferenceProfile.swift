@@ -11,13 +11,42 @@ import MLXLMCommon
 enum ModelProfileKind: String, Codable, CaseIterable {
     case text
     case vision
+    case drafter
 }
 
 typealias InferenceProfileKind = ModelProfileKind
 
-enum ModelTier: String, Codable, CaseIterable {
+enum ModelTier: String, Codable, CaseIterable, Comparable {
     case eightGB
     case sixteenGB
+    case twentyFourGB
+    case thirtyTwoGB
+
+    var minimumSystemMemoryBytes: UInt64 {
+        switch self {
+        case .eightGB: 8.gibibytes
+        case .sixteenGB: 16.gibibytes
+        case .twentyFourGB: 24.gibibytes
+        case .thirtyTwoGB: 32.gibibytes
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .eightGB: "8 GB tier"
+        case .sixteenGB: "16 GB tier"
+        case .twentyFourGB: "24 GB tier"
+        case .thirtyTwoGB: "32 GB tier"
+        }
+    }
+
+    static func tier(forSystemMemory bytes: UInt64) -> ModelTier {
+        allCases.last { bytes >= $0.minimumSystemMemoryBytes } ?? .eightGB
+    }
+
+    static func < (lhs: ModelTier, rhs: ModelTier) -> Bool {
+        lhs.minimumSystemMemoryBytes < rhs.minimumSystemMemoryBytes
+    }
 }
 
 typealias InferenceTier = ModelTier
@@ -27,33 +56,33 @@ struct ModelRuntimeDefaults: Equatable, Sendable {
     var temperature: Float
     var topP: Float
     var prefillStepSize: Int
-    var maxKVSize: Int
-    var kvBits: Int
+    var maxContextTokens: Int
+    var kvBits: Int?
     var imageResize: CGSize?
     var documentImageLimit: Int
     var minEmbeddedImageDimension: CGFloat
 
     static let text = ModelRuntimeDefaults(
-        maxTokens: 1024,
-        temperature: 0.2,
+        maxTokens: 2_048,
+        temperature: 0.3,
         topP: 0.9,
-        prefillStepSize: 256,
-        maxKVSize: 6144,
-        kvBits: 4,
+        prefillStepSize: 512,
+        maxContextTokens: 32_768,
+        kvBits: 8,
         imageResize: nil,
         documentImageLimit: 0,
         minEmbeddedImageDimension: 64
     )
 
     static let vision = ModelRuntimeDefaults(
-        maxTokens: 1024,
-        temperature: 0.2,
+        maxTokens: 2_048,
+        temperature: 0.3,
         topP: 0.9,
-        prefillStepSize: 256,
-        maxKVSize: 6144,
-        kvBits: 4,
+        prefillStepSize: 512,
+        maxContextTokens: 32_768,
+        kvBits: 8,
         imageResize: CGSize(width: 1024, height: 1024),
-        documentImageLimit: 2,
+        documentImageLimit: 4,
         minEmbeddedImageDimension: 64
     )
 
@@ -63,9 +92,9 @@ struct ModelRuntimeDefaults: Equatable, Sendable {
         return copy
     }
 
-    func withMaxKVSize(_ maxKVSize: Int) -> ModelRuntimeDefaults {
+    func withMaxContextTokens(_ maxContextTokens: Int) -> ModelRuntimeDefaults {
         var copy = self
-        copy.maxKVSize = maxKVSize
+        copy.maxContextTokens = maxContextTokens
         return copy
     }
 
@@ -86,12 +115,11 @@ struct ModelRuntimeDefaults: Equatable, Sendable {
         temperatureOverride: Float? = nil
     ) -> GenerateParameters {
         GenerateParameters(
-            maxTokens: maxTokensOverride,
-            maxKVSize: maxKVSize,
+            maxTokens: maxTokensOverride ?? maxTokens,
             kvBits: kvBits,
             temperature: temperatureOverride ?? temperature,
             topP: topP,
-            prefillStepSize: prefillStepSize
+            prefill: PrefillParameters(stepSize: prefillStepSize)
         )
     }
 }
@@ -119,30 +147,55 @@ struct ModelProfile: Identifiable, Sendable {
     var parameterScale: String = ""
     var strengths: [String] = []
     var isRecommended: Bool = false
+    var downloadBytes: UInt64 = 0
+    var kvBytesPerToken: Int = 32_768
+    var drafterRepository: String?
+    var drafterBytes: UInt64 = 0
 
     var supportsVision: Bool { kind == .vision }
+
+    var supportsSpeculativeDecoding: Bool { drafterRepository != nil }
+
+    var drafterProfile: ModelProfile? {
+        guard let drafterRepository else { return nil }
+        return ModelProfile(
+            id: "\(id).drafter",
+            name: "\(name) speed-up",
+            subtitle: "Multi-token prediction drafter",
+            modelIdentifier: drafterRepository,
+            kind: .drafter,
+            tier: tier,
+            minimumSystemMemoryBytes: minimumSystemMemoryBytes,
+            defaults: .text,
+            configuration: .embedder(ModelConfiguration(id: drafterRepository)),
+            downloadBytes: drafterBytes
+        )
+    }
+
+    var totalDownloadBytes: UInt64 { downloadBytes + drafterBytes }
 
     var minimumSystemMemoryDescription: String {
         ByteCountFormatter.localTutorMemoryString(fromByteCount: Int64(minimumSystemMemoryBytes))
     }
 
+    var downloadSizeDescription: String {
+        ByteCountFormatter.string(fromByteCount: Int64(totalDownloadBytes), countStyle: .file)
+    }
+
     var tierLabel: String {
-        switch tier {
-        case .eightGB: "8 GB tier"
-        case .sixteenGB: "16 GB tier"
-        }
+        tier.label
     }
 }
 
 typealias InferenceProfile = ModelProfile
 
 extension ModelProfile {
-    static let gemma4E2B = ModelCatalog.gemma4E2B
-    static let gemma4E4B = ModelCatalog.gemma4E4B
-    static let qwen3VL4B = ModelCatalog.qwen3VL4B
-    static let lfm25A1B8B = ModelCatalog.lfm25A1B8B
-    static let v0Catalog = ModelCatalog.v0Catalog
-    static let studyCatalog = ModelCatalog.studyCatalog
+    static var gemma4E2B: ModelProfile { ModelCatalog.require("gemma4E2B") }
+    static var gemma4E4B: ModelProfile { ModelCatalog.require("gemma4E4B") }
+    static var qwen35_4B: ModelProfile { ModelCatalog.require("qwen35_4B") }
+    static var qwen35_9B: ModelProfile { ModelCatalog.require("qwen35_9B") }
+    static var lfm25A1B8B: ModelProfile { ModelCatalog.require("lfm25A1B8B") }
+    static var studyCatalog: [ModelProfile] { ModelCatalog.studyCatalog }
 
     static func profile(withID id: String) -> ModelProfile? {
         ModelCatalog.profile(withID: id)

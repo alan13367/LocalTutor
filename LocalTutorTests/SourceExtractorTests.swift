@@ -12,6 +12,12 @@ import ZIPFoundation
 @testable import LocalTutor
 
 struct SourceExtractorTests {
+    static var constrainedPolicy: ModelRuntimePolicy {
+        var policy = ModelRuntimePolicyProvider.policy(for: .gemma4E4B, systemMemoryBytes: 16.gibibytes, preference: .standard)
+        policy.contextTokens = 4_096
+        return policy
+    }
+
     @Test
     func extractionPreservesAttachmentOrderAndConcatenatesText() async throws {
         let directory = try temporaryDirectory()
@@ -587,6 +593,7 @@ struct SourceExtractorTests {
             for: user,
             history: [],
             profile: .gemma4E4B,
+            runtimePolicy: Self.constrainedPolicy,
             generateIntermediate: { _, _, _ in
                 await counter.increment()
                 return "intermediate"
@@ -615,6 +622,7 @@ struct SourceExtractorTests {
             for: user,
             history: [],
             profile: .gemma4E4B,
+            runtimePolicy: Self.constrainedPolicy,
             generateIntermediate: { _, _, _ in
                 await counter.increment()
                 return "intermediate"
@@ -658,6 +666,7 @@ struct SourceExtractorTests {
             for: user,
             history: [],
             profile: .gemma4E4B,
+            runtimePolicy: Self.constrainedPolicy,
             generateIntermediate: { _, maxTokens, _ in
                 await recorder.record(maxTokens)
                 return "A concise source-grounded optimization summary."

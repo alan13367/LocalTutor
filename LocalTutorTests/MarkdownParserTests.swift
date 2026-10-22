@@ -98,4 +98,95 @@ struct MarkdownParserTests {
     private func plainText(_ attributed: AttributedString) -> String {
         String(attributed.characters)
     }
+
+    @Test
+    func streamingHealerClosesOrHidesUnfinishedInlineMarkup() {
+        #expect(MarkdownStreamHealer.heal("The **pulmo") == "The **pulmo**")
+        #expect(MarkdownStreamHealer.heal("The **pulmones** and *alv") == "The **pulmones** and *alv*")
+        #expect(MarkdownStreamHealer.heal("Use `print(") == "Use `print(`")
+        #expect(MarkdownStreamHealer.heal("Gas exchange **") == "Gas exchange")
+        #expect(MarkdownStreamHealer.heal("Gas exchange [8") == "Gas exchange")
+        #expect(MarkdownStreamHealer.heal("See [docs](https://exa") == "See")
+        #expect(MarkdownStreamHealer.heal("Energy $E = mc") == "Energy")
+        #expect(MarkdownStreamHealer.heal("Area is 2 * 3 and **bo") == "Area is 2 * 3 and **bo**")
+        #expect(MarkdownStreamHealer.heal("- **Alveoli**: tiny sacs") == "- **Alveoli**: tiny sacs")
+        #expect(MarkdownStreamHealer.heal("Intro\n-") == "Intro\n")
+        #expect(MarkdownStreamHealer.heal("| Organ | Role |\n|---") == "")
+        #expect(MarkdownStreamHealer.heal("| Organ | Role |\n|---|---|\n| Lungs | Ga") == "| Organ | Role |\n|---|---|\n")
+        #expect(MarkdownStreamHealer.heal("```swift\nlet a = **b") == "```swift\nlet a = **b")
+    }
+
+    @Test
+    func streamingRendererMatchesFullParseAndKeepsBlockIdentity() {
+        let answer = """
+        ## Lungs
+
+        The **lungs** exchange gases [1].
+
+        1. Oxygen enters
+        2. Carbon dioxide leaves
+
+        ```text
+        a
+
+        b
+        ```
+
+        | Part | Role |
+        |---|---|
+        | Alveoli | Exchange |
+        """
+        let renderer = MarkdownStreamRenderer()
+        var previousIDs: [String] = []
+        for length in stride(from: 1, through: answer.count, by: 3) {
+            let blocks = renderer.blocks(for: String(answer.prefix(length)), isStreaming: true, citationCount: 1)
+            let ids = blocks.map(\.id)
+            let stableCount = max(0, min(previousIDs.count, ids.count) - 1)
+            #expect(Array(ids.prefix(stableCount)) == Array(previousIDs.prefix(stableCount)))
+            for block in blocks {
+                if case .paragraph(let text, _) = block {
+                    #expect(!String(text.characters).contains("**"))
+                }
+            }
+            previousIDs = ids
+        }
+
+        let streamedEnd = renderer.blocks(for: answer + "\n", isStreaming: true, citationCount: 1)
+        let final = MarkdownStreamRenderer().blocks(for: answer, isStreaming: false, citationCount: 1)
+        #expect(streamedEnd == final)
+        #expect(final.map(\.id) == MarkdownParser.parse(CitationLinker.linkify(answer, validRange: 1...1)).map(\.id))
+    }
+
+    @Test
+    func stableBoundaryIgnoresBlankLinesInsideCodeFences() {
+        let text = "Intro\n\n```\na\n\nb"
+        let boundary = MarkdownStreamRenderer.stableBoundary(in: text)
+        #expect(String(text[..<boundary]) == "Intro\n\n")
+    }
+
+    @Test
+    func numberedItemsKeepTheirWrittenNumbersAcrossBlankLines() {
+        let blocks = MarkdownParser.parse("1. First\n\n2. Second")
+        let numbers = blocks.compactMap { block -> Int? in
+            if case .numberedList(let items, _) = block { return items.first?.number }
+            return nil
+        }
+        #expect(numbers == [1, 2])
+    }
+
+    @Test
+    func revealPacerSmoothsBurstsAndAlwaysCatchesUp() {
+        var pacer = RevealPacer()
+        var backlog = 120
+        var perFrame: [Int] = []
+        for _ in 0..<120 where backlog > 0 {
+            let count = pacer.charactersToReveal(backlog: backlog, elapsed: 1.0 / 60)
+            perFrame.append(count)
+            backlog -= count
+        }
+        #expect(backlog == 0)
+        #expect(perFrame.first! < 120 / 4)
+        #expect(perFrame.count < 60)
+        #expect(perFrame.allSatisfy { $0 >= 0 })
+    }
 }
