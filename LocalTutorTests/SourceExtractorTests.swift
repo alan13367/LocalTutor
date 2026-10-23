@@ -85,6 +85,24 @@ struct SourceExtractorTests {
     }
 
     @Test
+    func scannedPDFPagesAreRecognizedAsText() async throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("handwritten.pdf")
+        try scannedTextPDFData("Photosynthesis converts light energy into chemical energy").write(to: url)
+
+        let extracted = await SourceExtractor.extract(
+            [StudySource(url: url)],
+            options: SourceExtractionOptions(imageLimit: 0, imageResize: CGSize(width: 1024, height: 1024), minEmbeddedImageDimension: 64)
+        )
+
+        let text = extracted.first?.text ?? ""
+        #expect(extracted.first?.failureReason == nil)
+        #expect(text.contains(SourceExtractor.scannedPageNote))
+        #expect(text.localizedCaseInsensitiveContains("photosynthesis"))
+        #expect(text.localizedCaseInsensitiveContains("chemical energy"))
+    }
+
+    @Test
     func docxExtractsTextAndInlineImage() async throws {
         let directory = try temporaryDirectory()
         let url = directory.appendingPathComponent("notes.docx")
@@ -689,11 +707,12 @@ struct SourceExtractorTests {
             SourceChunk(id: "3", sourceID: sourceID, sourceName: "paper.pdf", locator: "page 6", headingPath: ["5 Training"], ordinal: 3, text: "Training", estimatedTokenCount: 10)
         ]
 
-        let groups = SourceContextPlanner.sectionGroups(for: chunks, budget: 100)
+        let groups = SourceContextPlanner.sectionGroups(for: chunks, budget: 30)
 
         #expect(groups.count == 2)
         #expect(groups[0].count == 2)
         #expect(groups[1].first?.headingPath == ["5 Training"])
+        #expect(SourceContextPlanner.sectionGroups(for: chunks, budget: 100).count == 1)
     }
 
     @Test
@@ -792,6 +811,34 @@ struct SourceExtractorTests {
             context.fill(CGRect(x: 40, y: 160, width: 220, height: 80))
             context.endPDFPage()
         }
+        context.closePDF()
+        return data as Data
+    }
+
+    private func scannedTextPDFData(_ text: String) throws -> Data {
+        let size = NSSize(width: 1200, height: 300)
+        let image = NSImage(size: size, flipped: false) { rect in
+            NSColor.white.setFill()
+            rect.fill()
+            (text as NSString).draw(
+                in: rect.insetBy(dx: 40, dy: 60),
+                withAttributes: [.font: NSFont.systemFont(ofSize: 44), .foregroundColor: NSColor.black]
+            )
+            return true
+        }
+        var proposed = CGRect(origin: .zero, size: size)
+        guard let cgImage = image.cgImage(forProposedRect: &proposed, context: nil, hints: nil) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        let data = NSMutableData()
+        var mediaBox = CGRect(x: 0, y: 0, width: 612, height: 400)
+        guard let consumer = CGDataConsumer(data: data),
+              let context = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        context.beginPDFPage(nil)
+        context.draw(cgImage, in: CGRect(x: 6, y: 50, width: 600, height: 150))
+        context.endPDFPage()
         context.closePDF()
         return data as Data
     }

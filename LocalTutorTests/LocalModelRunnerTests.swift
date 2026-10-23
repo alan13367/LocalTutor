@@ -5,6 +5,9 @@
 //
 
 import Foundation
+import MLX
+import MLXLMCommon
+@testable import MLXVLM
 import Testing
 import UniformTypeIdentifiers
 @testable import LocalTutor
@@ -324,6 +327,28 @@ struct LocalModelRunnerTests {
         """
 
         #expect(ReasoningOutputFilter.sanitize(raw) == "\n# Final answer\nStudy this.")
+    }
+
+    @Test
+    func reasoningOutputFilterRemovesGemmaThinkingChannel() {
+        let raw = "<|channel>think\nThinking Process:\n1. Plan the summary.<channel|># Study Summary\nCovers logic."
+
+        #expect(ReasoningOutputFilter.sanitize(raw) == "# Study Summary\nCovers logic.")
+    }
+
+    @Test
+    func unclosedThinkingRecoversTheAnswerAfterPlanning() {
+        let reasoning = "\nThinking Process:\n1. **Plan** the summary.\n\n# Study Summary\n\n## Logic\n* Truth tables [1].\n</think]\n"
+
+        #expect(ReasoningOutputFilter.recoveredAnswer(fromReasoning: reasoning) == "# Study Summary\n\n## Logic\n* Truth tables [1].")
+        #expect(ReasoningOutputFilter.recoveredAnswer(fromReasoning: "1. Plan only, no answer yet.") == nil)
+    }
+
+    @Test
+    func thinkingSystemInstructionDoesNotNameReasoningTags() {
+        #expect(!StudyPromptBuilder.thinkingSystemInstruction.contains("<think>"))
+        #expect(StudyPromptBuilder.systemInstruction.contains("<think>"))
+        #expect(StudyPromptBuilder.thinkingSystemInstruction.hasPrefix("You are LocalTutor"))
     }
 
     @Test
@@ -652,4 +677,49 @@ private struct NoopInferenceService: InferenceService {
     func setSpeculativeDecoding(_: Bool) async {}
 
     func clearCache() async throws {}
+}
+
+@Suite("Gemma 4 multimodal prefill")
+struct Gemma4MultimodalPrefillTests {
+    private let tokenTypes: [Int32] = [0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0]
+
+    @Test("Prefill windows never split a vision block and end on the last token")
+    func prefillRanges() {
+        let blocks = gemma4VisionBlocks(tokenTypes: tokenTypes)
+        #expect(blocks == [2 ..< 5, 7 ..< 11])
+        let ranges = gemma4MultimodalPrefillRanges(total: tokenTypes.count, visionBlocks: blocks, stepSize: 3)
+        #expect(ranges.first?.lowerBound == 0)
+        #expect(ranges.last == 13 ..< 14)
+        #expect(zip(ranges, ranges.dropFirst()).allSatisfy { $0.upperBound == $1.lowerBound })
+        #expect(ranges.allSatisfy { range in
+            blocks.allSatisfy { !($0.lowerBound < range.upperBound && range.upperBound < $0.upperBound) }
+        })
+    }
+
+    @Test("Chunked block-bidirectional masks match the single-pass mask", arguments: [nil, 4] as [Int?])
+    func chunkedMasksMatchSinglePass(windowSize: Int?) {
+        let total = tokenTypes.count
+        let types = MLXArray(tokenTypes).expandedDimensions(axis: 0)
+        guard case .array(let full) = gemma4ApplyBlockwiseBidirectionalOverlay(
+            .array(createCausalMask(n: total, offset: 0, windowSize: windowSize)),
+            tokenTypeIds: types, sequenceLength: total, windowSize: windowSize
+        ) else {
+            Issue.record("single-pass mask was not an array")
+            return
+        }
+        let ranges = gemma4MultimodalPrefillRanges(
+            total: total, visionBlocks: gemma4VisionBlocks(tokenTypes: tokenTypes), stepSize: 3)
+        for range in ranges where range.count > 1 {
+            guard case .array(let chunk) = gemma4ApplyBlockwiseBidirectionalOverlay(
+                .array(createCausalMask(n: range.count, offset: range.lowerBound, windowSize: windowSize)),
+                tokenTypeIds: types[0..., range], sequenceLength: range.count, windowSize: windowSize
+            ) else {
+                Issue.record("chunk mask was not an array")
+                continue
+            }
+            let expected = full[0..., 0..., range, ..<range.upperBound]
+            #expect(chunk.shape == expected.shape)
+            #expect(arrayEqual(chunk, expected).item(Bool.self), "window \(String(describing: windowSize)) chunk \(range)")
+        }
+    }
 }

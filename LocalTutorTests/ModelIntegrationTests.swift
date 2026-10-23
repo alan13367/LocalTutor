@@ -526,3 +526,174 @@ struct KVCacheBenchmarkTests {
         String(format: "%.2f GB", Double(bytes) / 1_073_741_824)
     }
 }
+
+@Suite(.serialized, .enabled(if: Integration.isEnabled))
+struct MultimodalPrefillIntegrationTests {
+    @Test(.timeLimit(.minutes(30)))
+    func notebookSizedPromptWithImagesStaysWithinMemory() async throws {
+        let profile = Integration.profile
+        guard profile.supportsVision else { return }
+        let policy = ModelRuntimePolicyProvider.policy(for: profile, preference: .extended)
+        let topics = ["automata", "grammars", "complexity", "logic", "search", "planning", "probability", "learning"]
+        let paragraphs = (1 ... 540).map { index in
+            "Section \(index). Lecture \(index % 14 + 1) covers \(topics[index % topics.count]): definition \(index * 7 % 97) relates state \(index % 23) to transition \(index * 3 % 41), and the proof sketch reduces case \(index % 5) to lemma \(index % 11) before generalising."
+        }
+        let content = StudyPromptContent(
+            systemInstruction: StudyPromptBuilder.systemInstruction,
+            openingText: StudyResourceKind.summary.promptInstruction,
+            sourceBlocks: [.text(paragraphs.joined(separator: "\n\n"))] + Self.figures.map { .image($0) },
+            closingText: "Write the summary now.",
+            includedImageCount: Self.figures.count,
+            omittedImageCount: 0,
+            imageFilenames: Self.figures.map(\.sourceName),
+            warnings: []
+        )
+
+        let record = try await Integration.runner.run(
+            request: InferenceRequest(profile: profile, runtimePolicy: policy, promptContent: content, maxTokens: 48, temperature: 0)
+        ) { _ in }
+
+        try #require(record.status == .success, "\(record.errorMessage ?? "")")
+        let peak = record.mlxMemoryAfter?.peakBytes ?? 0
+        print("[integration] multimodal prefill \(profile.id): prompt=\(record.tokenMetrics.promptTokens ?? -1) tokens, generated=\(record.tokenMetrics.generatedTokens ?? -1) stop=\(record.tokenMetrics.stopReason ?? "-"), mlx peak=\(Self.gb(peak)), process peak=\(Self.gb(record.processPeakPhysicalFootprintBytes ?? 0)), output=\(record.output.prefix(120))")
+        #expect((record.tokenMetrics.promptTokens ?? 0) > 20_000)
+        #expect(peak < 8 * 1_073_741_824)
+        #expect((record.tokenMetrics.generatedTokens ?? 0) > 0)
+    }
+
+    @Test(.timeLimit(.minutes(30)))
+    func chunkedImagePrefillMatchesSinglePass() async throws {
+        let profile = Integration.profile
+        guard profile.supportsVision, case .vlm(var configuration) = profile.configuration else { return }
+        let policy = ModelRuntimePolicyProvider.policy(for: profile)
+        let download = try await ManagedModelDownloadService.shared.ensureDownloaded(profile: profile) { _ in }
+        configuration.id = .directory(download.directory)
+        let container = try await VLMModelFactory.shared.loadContainer(
+            from: LocalDirectoryOnlyDownloader(),
+            using: TransformersTokenizerLoader(),
+            configuration: configuration
+        )
+        let content = StudyPromptContent(
+            systemInstruction: StudyPromptBuilder.systemInstruction,
+            openingText: "Explain how the two figures relate to these notes.",
+            sourceBlocks: [.text(Integration.notes), .image(Self.figures[0]), .text("Second figure:"), .image(Self.figures[1])],
+            closingText: "Answer in one sentence.",
+            includedImageCount: 2,
+            omittedImageCount: 0,
+            imageFilenames: Self.figures.map(\.sourceName),
+            warnings: []
+        )
+        let input = UncheckedSendableBox(try await container.prepare(
+            input: LocalModelRunner.makeUserInput(promptContent: content, profile: profile, runtimePolicy: policy)
+        ))
+
+        let comparison = try await container.perform { context in
+            func lastLogits(_ prefill: PrefillParameters) throws -> (logits: MLXArray, offset: Int) {
+                let cache = try context.model.newCache(parameters: nil)
+                guard case .logits(let output) = try context.model.prepare(input.value, cache: cache, state: nil, prefill: prefill) else {
+                    throw CancellationError()
+                }
+                let logits = output.logits[0, -1].asType(.float32)
+                eval(logits)
+                return (logits, cache.first?.offset ?? -1)
+            }
+            let single = try lastLogits(PrefillParameters(chunking: .unchunked))
+            let chunked = try lastLogits(PrefillParameters(stepSize: 48))
+            let cosine = (single.logits * chunked.logits).sum() / (sqrt((single.logits * single.logits).sum()) * sqrt((chunked.logits * chunked.logits).sum()))
+            return (
+                promptTokens: input.value.text.tokens.size,
+                offsets: [single.offset, chunked.offset],
+                sameTop: (argMax(single.logits) .== argMax(chunked.logits)).item(Bool.self),
+                cosine: cosine.item(Float.self),
+                maxDifference: abs(single.logits - chunked.logits).max().item(Float.self)
+            )
+        }
+
+        print("[integration] chunked vs single-pass \(profile.id): prompt=\(comparison.promptTokens) offsets=\(comparison.offsets) sameTop=\(comparison.sameTop) cosine=\(comparison.cosine) maxDiff=\(comparison.maxDifference)")
+        #expect(comparison.offsets[0] == comparison.offsets[1])
+        #expect(comparison.sameTop)
+        #expect(comparison.cosine > 0.999)
+    }
+
+    private static let figures: [DocumentImage] = [
+        CIImage(color: CIColor(red: 0.9, green: 0.05, blue: 0.05)),
+        CIImage(color: CIColor(red: 0.05, green: 0.2, blue: 0.9))
+    ].enumerated().map { index, color in
+        let image = color.cropped(to: CGRect(x: 0, y: 0, width: 768, height: 1024))
+        return DocumentImage(image: image, sourceName: "notes_\(index + 1).pdf", locator: "page \(index + 4)", caption: "Page render with visual material", isStandalone: false, originalSize: image.extent.size)
+    }
+
+    private static func gb(_ bytes: UInt64) -> String {
+        String(format: "%.2f GB", Double(bytes) / 1_073_741_824)
+    }
+}
+
+@Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["LOCALTUTOR_EVAL_URL"] != nil))
+struct NotebookSummaryEvaluation {
+    @Test(.timeLimit(.minutes(60)))
+    func summarizeServedNotebook() async throws {
+        let base = try #require(ProcessInfo.processInfo.environment["LOCALTUTOR_EVAL_URL"].flatMap(URL.init(string:)))
+        let names = (ProcessInfo.processInfo.environment["LOCALTUTOR_EVAL_FILES"] ?? "notes_1.pdf,notes_2.pdf,notes_3.pdf").split(separator: ",").map(String.init)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("eval-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var sources: [StudySource] = []
+        for name in names {
+            let (data, _) = try await URLSession.shared.data(from: base.appendingPathComponent(name))
+            let url = root.appendingPathComponent(name)
+            try data.write(to: url)
+            sources.append(StudySource(url: url))
+        }
+        let profile = Integration.profile
+        let policy = ModelRuntimePolicyProvider.policy(for: profile)
+        let user = StudyTurnUser(focus: "", resourceKind: .summary, sources: sources, isRefinement: false)
+        let variants = (ProcessInfo.processInfo.environment["LOCALTUTOR_EVAL_VARIANTS"] ?? "current,noImages").split(separator: ",").map(String.init)
+        print("[eval] \(profile.id) context=\(policy.contextTokens) budget=\(PromptPacker.promptBudget(for: policy, resourceKind: .summary))")
+
+        for variant in variants {
+            let started = Date()
+            var content = try await SourceContextPlanner.content(
+                for: user, history: [], profile: profile, runtimePolicy: policy,
+                generateIntermediate: { content, maxTokens, temperature in
+                    let record = try await Integration.runner.run(
+                        request: InferenceRequest(profile: profile, runtimePolicy: policy, promptContent: content, maxTokens: maxTokens, temperature: temperature)
+                    ) { _ in }
+                    print("[eval] intermediate \(record.tokenMetrics.generatedTokens ?? -1) tokens, language=\(ResponseLanguage.detect(record.output)?.rawValue ?? "?"): \(record.output.prefix(160).replacingOccurrences(of: "\n", with: "⏎"))")
+                    return record.output
+                },
+                status: { message in print("[eval] status: \(message)") }
+            )
+            if variant == "noImages" {
+                content.sourceBlocks = content.sourceBlocks.filter { if case .image = $0 { return false } else { return true } }
+            }
+            let images = content.sourceBlocks.filter { if case .image = $0 { return true } else { return false } }.count
+            let repeats = Int(ProcessInfo.processInfo.environment["LOCALTUTOR_EVAL_REPEATS"] ?? "1") ?? 1
+            var record: BenchmarkRecord!
+            for attempt in 1 ... repeats {
+                let reasoning = ReasoningRecorder()
+                record = try await Integration.runner.run(
+                    request: StudioController.request(for: .summary, profile: profile, policy: policy, content: content)
+                ) { event in
+                    if case .reasoningChunk(let chunk) = event { await reasoning.append(chunk) }
+                }
+                let reasoningText = await reasoning.text
+                print("[eval] attempt \(attempt): visible=\(record.output.count) reasoning=\(reasoningText.count) generated=\(record.tokenMetrics.generatedTokens ?? -1) stop=\(record.tokenMetrics.stopReason ?? "-")")
+                if record.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    print("[eval] empty-visible reasoning tail: \(reasoningText.suffix(1500).replacingOccurrences(of: "\n", with: "⏎"))")
+                    let markers = ["<channel|>", "<|channel>", "</think>", "<think>", "<|channel|>", "final", "<turn|>"]
+                    print("[eval] markers: \(markers.map { "\($0)=\(reasoningText.components(separatedBy: $0).count - 1)" })")
+                }
+            }
+            print("[eval] ===== \(variant): status=\(record.status) prompt=\(record.tokenMetrics.promptTokens ?? -1) images=\(images) generated=\(record.tokenMetrics.generatedTokens ?? -1) seconds=\(Int(Date().timeIntervalSince(started))) peak=\(String(format: "%.2f GB", Double(record.mlxMemoryAfter?.peakBytes ?? 0) / 1_073_741_824))")
+            print("[eval] warnings: \(content.warnings)")
+            print("[eval-output-begin \(variant)]\n\(record.output)\n[eval-output-end \(variant)]")
+        }
+    }
+}
+
+private actor ReasoningRecorder {
+    private(set) var text = ""
+
+    func append(_ chunk: String) {
+        text += chunk
+    }
+}

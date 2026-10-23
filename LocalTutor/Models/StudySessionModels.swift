@@ -86,7 +86,7 @@ enum StudyResourceKind: String, CaseIterable, Identifiable, Codable {
         case .briefing:
             "Write a briefing document: an executive summary paragraph, then the most important themes and findings as headed sections with supporting facts, notable quotes or figures, and a closing list of open questions."
         case .summary:
-            "Create a structured study summary with the main ideas, supporting details, and a short review checklist."
+            "Create a structured study summary of all the provided material. Give every major topic its own short section with 2-5 bullet points covering its key definitions and results, keep the sources' order, and do not go deep into any single topic so that nothing is left out. End with a short review checklist. Stay under about 900 words."
         case .beginnerExplanation:
             "Explain the material as if the student is new to the topic. Use simple language, analogies only when they clarify, and define important terms."
         case .flashcards:

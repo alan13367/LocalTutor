@@ -15,6 +15,7 @@ struct SourcePromptContext: Sendable {
     var imageFilenames: [String]
     var omittedTextChunkCount: Int
     var citations: [SourceCitation] = []
+    var languageSample: String?
 }
 
 struct SourceRetrievalResult: Sendable {

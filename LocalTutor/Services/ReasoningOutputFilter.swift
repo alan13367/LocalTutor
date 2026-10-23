@@ -16,6 +16,8 @@ struct ReasoningOutputFilter: Sendable {
         "<|channel>thought",
         "<|channel|>thought",
         "<channel|>thought",
+        "<|channel>think",
+        "<|channel|>think",
         "<|channel>analysis",
         "<|channel|>analysis",
         "<channel|>analysis"
@@ -74,6 +76,21 @@ struct ReasoningOutputFilter: Sendable {
         buffer = ""
         isInsideReasoning = false
         return output
+    }
+
+    static func recoveredAnswer(fromReasoning reasoning: String) -> String? {
+        let lines = reasoning.components(separatedBy: "\n")
+        guard let start = lines.firstIndex(where: { $0.hasPrefix("# ") })
+            ?? lines.firstIndex(where: { $0.hasPrefix("## ") }) else {
+            return nil
+        }
+        var answer = Array(lines[start...])
+        while let last = answer.last?.trimmingCharacters(in: .whitespaces).lowercased(),
+              last.isEmpty || (last.hasPrefix("<") && (last.contains("think") || last.contains("channel"))) {
+            answer.removeLast()
+        }
+        let text = answer.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
     }
 
     static func sanitize(_ text: String) -> String {

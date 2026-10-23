@@ -6,7 +6,8 @@ Native macOS app for studying with local AI models. SwiftUI + MLX Swift. Premium
 
 - Swift 6.0 (strict concurrency), macOS 26.0+, App Sandbox
 - SwiftUI with Liquid Glass (`NavigationSplitView` + `.inspector`, `@Observable` state)
-- MLX Swift (v0.32.3) + mlx-swift-lm (pinned to a `main` revision for EmbeddingGemma 2 support; move back to a tagged release once one includes it) for on-device LLM inference, `MLXGuidedGeneration` for schema-constrained JSON
+- MLX Swift (v0.32.3) + mlx-swift-lm for on-device LLM inference, `MLXGuidedGeneration` for schema-constrained JSON
+- mlx-swift-lm is vendored as a local package in `Vendor/mlx-swift-lm` (upstream `main` @ `bb0d5b04`, needed for EmbeddingGemma 2) with one local patch: Gemma 4 image/video prompts prefill in chunks that never split a vision block, with block-bidirectional masks that account for cached keys, and return logits only for the final positions (`Libraries/MLXVLM/Models/Gemma4.swift`). Upstream processed the whole prompt in one pass with logits for every position, which crashed on notebook-sized prompts with page images. Re-apply the patch when updating, or drop the vendored copy once upstream fixes it
 - Apple FoundationModels (Apple Intelligence) for small helper tasks when available
 - SPM via Xcode (no standalone Package.swift)
 
@@ -27,7 +28,7 @@ Inference: `InferenceService` protocol, `LocalModelRunner` actor. Requests queue
 
 Model catalog: `Resources/ModelCatalog.json` (standard MLX quantizations only, never OptiQ). Gemma 4 entries list an MTP drafter (`drafterRepository`); the runner downloads it with the model and decodes with an unquantized KV cache. `ChatSession` has no MTP support, so the MTP chat path keeps its own token ledger + KV cache and only appends the new prompt suffix (falls back to a full prefill when the prefix doesn't match). Downloads resume from `.partial` files via HTTP Range and are paused/cancelled through `ModelManager`. Context window is computed per Mac by `ContextBudget`: the model's native limit and KV cost come from its downloaded `config.json` (`ModelArchitecture`, catalog values before download), memory fit uses the GPU working set, and the Balanced preference also caps by prefill speed measured on this Mac (`PrefillSpeedStore`). No fixed per-tier caps.
 
-Source pipeline: Extract → Index (chunk + headings) → Retrieve (heading match + BM25 + EmbeddingGemma 2 text embeddings) → Pack (token budget) → numbered excerpts `[n]` → Infer → clickable citations. Chat puts the whole notebook in the stable instructions prefix when it fits, otherwise retrieves per question.
+Source pipeline: Extract → Index (chunk + headings) → Retrieve (heading match + BM25 + EmbeddingGemma 2 text embeddings) → Pack (token budget) → numbered excerpts `[n]` → Infer → clickable citations. Chat puts the whole notebook in the stable instructions prefix when it fits, otherwise retrieves per question. PDF pages without a text layer (scans, handwriting) are OCR'd with Vision at extraction and marked with `SourceExtractor.scannedPageNote`. Whole-notebook Studio items skip document page renders (standalone image sources still go in), distill the notebook section by section when it exceeds the model's synthesis budget (`SourceContextPlanner.synthesisBudget`, by memory tier: 8K / 12K / 24K tokens), and run free-text kinds with native thinking (`enable_thinking`, `StudyPromptBuilder.thinkingSystemInstruction`, which must not name `<think>` tags or Gemma 4 leaves its thought channel unclosed) plus a separate `StudioController.thinkingTokens` allowance; chat keeps thinking off. If a run ends with no visible text, `GenerationCollector` recovers the answer from the reasoning (`ReasoningOutputFilter.recoveredAnswer`). The response language comes from a sample of the original source text, not the distilled notes.
 
 ## Structure
 
@@ -53,6 +54,7 @@ LocalTutorTests/  Swift Testing tests
 - `#if DEBUG` for debug-only surfaces (e.g. the Model Lab window)
 - The app folder uses file system sync; test files in `LocalTutorTests/` still need pbxproj entries
 - Real-model checks: `TEST_RUNNER_LOCALTUTOR_INTEGRATION=1 xcodebuild test -only-testing:LocalTutorTests/ModelIntegrationTests` (downloads a model; `TEST_RUNNER_LOCALTUTOR_INTEGRATION_MODEL=<catalog id>` to pick one)
+- Notebook summary evaluation: serve a folder of sources over HTTP (the sandboxed test host can't read arbitrary paths), e.g. `python3 -m http.server 8765 --bind 127.0.0.1`, then `TEST_RUNNER_LOCALTUTOR_EVAL_URL=http://127.0.0.1:8765/ TEST_RUNNER_LOCALTUTOR_EVAL_FILES=a.pdf,b.pdf xcodebuild test -only-testing:LocalTutorTests/NotebookSummaryEvaluation` runs the real Studio summary pipeline and prints `[eval]` lines with the output (`TEST_RUNNER_LOCALTUTOR_EVAL_REPEATS=n` repeats the final step to check thinking reliability)
 - Retrieval benchmark: `-only-testing:LocalTutorTests/RetrievalBenchmarkTests` prints `[benchmark]` hit@1 / recall@5 / MRR@10 lines; lexical always runs, dense + hybrid need `TEST_RUNNER_LOCALTUTOR_INTEGRATION=1` (downloads EmbeddingGemma 2)
 
 ## Status

@@ -11,19 +11,22 @@ struct InferenceRequest: Sendable {
     var promptContent: StudyPromptContent
     var maxTokens: Int?
     var temperature: Float?
+    var thinking: Bool
 
     init(
         profile: ModelProfile,
         runtimePolicy: ModelRuntimePolicy,
         promptContent: StudyPromptContent,
         maxTokens: Int? = nil,
-        temperature: Float? = nil
+        temperature: Float? = nil,
+        thinking: Bool = false
     ) {
         self.profile = profile
         self.runtimePolicy = runtimePolicy
         self.promptContent = promptContent
         self.maxTokens = maxTokens
         self.temperature = temperature
+        self.thinking = thinking
     }
 }
 

@@ -8,9 +8,20 @@ import Foundation
 import NaturalLanguage
 
 enum StudyPromptBuilder {
-    static let systemInstruction = """
-    You are LocalTutor, a private study tutor running entirely on the student's Mac. Teach clearly and accurately, grounded in the student's own sources. If this model emits a <think> block or a thought/analysis channel marker, keep internal thinking there, close it, then always write the final student-facing answer after it. Never stop after hidden thinking, and do not mix hidden reasoning into the final answer. Use plain Markdown for study content. Do not wrap ordinary words, filenames, acronyms, checklist boxes, or citations in LaTeX/math delimiters. Use Unicode symbols such as ☐ instead of $\\square$; reserve LaTeX only for real equations.
-    """
+    private static let tutorRole = "You are LocalTutor, a private study tutor running entirely on the student's Mac. Teach clearly and accurately, grounded in the student's own sources."
+    private static let markdownRules = "Use plain Markdown for study content. Do not wrap ordinary words, filenames, acronyms, checklist boxes, or citations in LaTeX/math delimiters. Use Unicode symbols such as ☐ instead of $\\square$; reserve LaTeX only for real equations."
+
+    static let systemInstruction = [
+        tutorRole,
+        "If this model emits a <think> block or a thought/analysis channel marker, keep internal thinking there, close it, then always write the final student-facing answer after it. Never stop after hidden thinking, and do not mix hidden reasoning into the final answer.",
+        markdownRules
+    ].joined(separator: " ")
+
+    static let thinkingSystemInstruction = [
+        tutorRole,
+        "Think the task through first, then always write the complete student-facing answer after your thinking. Never stop after thinking.",
+        markdownRules
+    ].joined(separator: " ")
 
     static let citationInstruction = "Source excerpts are numbered like [1], [2]. After each sentence or bullet that uses a source, cite the excerpt numbers in square brackets, e.g. [3] or [2][5]. Only cite numbers that appear in the excerpts. Do not add a separate references list."
 
@@ -108,7 +119,7 @@ enum StudyPromptBuilder {
         }
         closingParts.append(ResponseLanguage.instruction(for: ResponseLanguage.resolve(
             question: trimmed.isEmpty ? nil : trimmed,
-            sourceText: ResponseLanguage.sourceSample(sourceText)
+            sourceText: sourceContext.languageSample ?? ResponseLanguage.sourceSample(sourceText)
         )))
         closingParts.append(formatBlock)
 

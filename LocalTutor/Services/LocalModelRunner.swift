@@ -174,7 +174,8 @@ actor LocalModelRunner: InferenceService {
                     input: Self.makeUserInput(
                         promptContent: request.promptContent,
                         profile: request.profile,
-                        runtimePolicy: request.runtimePolicy
+                        runtimePolicy: request.runtimePolicy,
+                        thinking: request.thinking
                     )
                 )
                 try Task.checkCancellation()
@@ -789,14 +790,18 @@ actor LocalModelRunner: InferenceService {
         }
     }
 
-    nonisolated static func chatTemplateContext(for profile: ModelProfile) -> [String: any Sendable]? {
-        ModelCatalog.disablesThinking(profile) ? ["enable_thinking": false] : nil
+    nonisolated static func chatTemplateContext(for profile: ModelProfile, thinking: Bool = false) -> [String: any Sendable]? {
+        if ModelCatalog.disablesThinking(profile) {
+            return ["enable_thinking": false]
+        }
+        return thinking ? ["enable_thinking": true] : nil
     }
 
     nonisolated static func makeUserInput(
         promptContent: StudyPromptContent,
         profile: ModelProfile,
-        runtimePolicy: ModelRuntimePolicy
+        runtimePolicy: ModelRuntimePolicy,
+        thinking: Bool = false
     ) -> UserInput {
         var chat: [Chat.Message] = []
         if !promptContent.systemInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -832,7 +837,7 @@ actor LocalModelRunner: InferenceService {
         return UserInput(
             chat: chat,
             processing: UserInput.Processing(resize: runtimePolicy.generationDefaults.imageResize),
-            additionalContext: chatTemplateContext(for: profile)
+            additionalContext: chatTemplateContext(for: profile, thinking: thinking)
         )
     }
 }
@@ -841,6 +846,7 @@ actor GenerationCollector {
     private let startedAt: Date
     private var outputFilter = ReasoningOutputFilter()
     private(set) var visibleOutput = ""
+    private var reasoningOutput = ""
     private(set) var firstTokenSeconds: Double?
     private(set) var completionInfo: GenerateCompletionInfo?
     private var structuredTokens: Int?
@@ -864,6 +870,7 @@ actor GenerationCollector {
             }
             let filtered = outputFilter.append(chunk)
             if !filtered.reasoning.isEmpty {
+                reasoningOutput += filtered.reasoning
                 await events(.reasoningChunk(filtered.reasoning))
             }
             if !filtered.visible.isEmpty {
@@ -894,11 +901,17 @@ actor GenerationCollector {
     func finish(events: @Sendable (LocalModelRunnerEvent) async -> Void) async {
         let trailing = outputFilter.finish()
         if !trailing.reasoning.isEmpty {
+            reasoningOutput += trailing.reasoning
             await events(.reasoningChunk(trailing.reasoning))
         }
         if !trailing.visible.isEmpty {
             visibleOutput += trailing.visible
             await events(.outputChunk(trailing.visible))
+        }
+        if visibleOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let recovered = ReasoningOutputFilter.recoveredAnswer(fromReasoning: reasoningOutput) {
+            visibleOutput = recovered
+            await events(.outputChunk(recovered))
         }
     }
 

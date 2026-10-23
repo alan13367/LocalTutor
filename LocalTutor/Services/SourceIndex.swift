@@ -15,7 +15,7 @@ struct SourceFingerprint: Codable, Equatable, Sendable {
 }
 
 struct SourceIndex: Codable, Equatable, Sendable {
-    static let schemaVersion = 5
+    static let schemaVersion = 6
 
     var sourceID: UUID
     var sourceName: String

@@ -19,7 +19,24 @@ enum SourceContextPlannerError: LocalizedError {
 enum SourceContextPlanner {
     typealias IntermediateGenerator = @Sendable (_ content: StudyPromptContent, _ maxTokens: Int?, _ temperature: Float?) async throws -> String
     typealias StatusHandler = @Sendable (_ message: String) async -> Void
-    static let maxIntermediateDistillationGroups = 6
+    static let maxIntermediateDistillationGroups = 16
+
+    static func synthesisBudget(for profile: ModelProfile, budget: Int) -> Int {
+        let limit = switch profile.tier {
+        case .eightGB: 8_192
+        case .sixteenGB: 12_288
+        case .twentyFourGB, .thirtyTwoGB: 24_576
+        }
+        return min(budget, limit)
+    }
+
+    static func standaloneVisuals(_ extracted: [ExtractedSource]) -> [ExtractedSource] {
+        extracted.map { source in
+            var source = source
+            source.blocks = source.blocks.filter { $0.imageValue?.isStandalone ?? true }
+            return source
+        }
+    }
 
     static func content(
         for user: StudyTurnUser,
@@ -59,7 +76,7 @@ enum SourceContextPlanner {
             return lhs.sourceName < rhs.sourceName
         }
 
-        let context: SourcePromptContext
+        var context: SourcePromptContext
         if shouldUseWholeDocument(user: user) {
             context = try await wholeDocumentContext(
                 user: user,
@@ -85,12 +102,29 @@ enum SourceContextPlanner {
             )
         }
 
+        context.languageSample = languageSample(chunks)
         return StudyPromptBuilder.content(
             for: user,
             history: history,
             sourceContext: context,
             supportsVision: runtimePolicy.supportsVision
         )
+    }
+
+    static func languageSample(_ chunks: [SourceChunk]) -> String {
+        let readable = chunks.filter { !$0.text.contains(SourceExtractor.scannedPageNote) }
+        guard !readable.isEmpty else { return "" }
+        let picks = min(readable.count, 12)
+        let texts = (0..<picks).map { readable[$0 * readable.count / picks].text.prefix(ResponseLanguage.sampleCharacterLimit / picks) }
+        return texts.joined(separator: "\n")
+    }
+
+    private static func languageInstruction(user: StudyTurnUser, chunks: [SourceChunk]) -> String {
+        let focus = user.focus.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ResponseLanguage.instruction(for: ResponseLanguage.resolve(
+            question: focus.isEmpty ? nil : focus,
+            sourceText: languageSample(chunks)
+        ))
     }
 
     static func shouldUseWholeDocument(user: StudyTurnUser) -> Bool {
@@ -108,7 +142,8 @@ enum SourceContextPlanner {
         for chunk in chunks {
             let key = sectionGroupingKey(for: chunk)
             let wouldOverflow = currentTokens + chunk.estimatedTokenCount > budget
-            if !current.isEmpty, (key != currentKey || wouldOverflow) {
+            let closesSection = key != currentKey && currentTokens >= budget / 2
+            if !current.isEmpty, (closesSection || wouldOverflow) {
                 groups.append(current)
                 current = []
                 currentTokens = 0
@@ -121,6 +156,10 @@ enum SourceContextPlanner {
             groups.append(current)
         }
         return groups
+    }
+
+    static func distillationGroups(for chunks: [SourceChunk], budget: Int) -> [[SourceChunk]] {
+        sectionGroups(for: chunks, budget: max(1, budget / 2))
     }
 
     private static func sectionGroupingKey(for chunk: SourceChunk) -> String {
@@ -225,6 +264,7 @@ enum SourceContextPlanner {
         generateIntermediate: IntermediateGenerator?,
         status: StatusHandler
     ) async throws -> SourcePromptContext {
+        let visualExtracted = standaloneVisuals(visualExtracted)
         guard !chunks.isEmpty else {
             return SourceContextRenderer.context(
                 title: "No readable source text was found.",
@@ -235,6 +275,7 @@ enum SourceContextPlanner {
             )
         }
 
+        let budget = generateIntermediate == nil ? budget : synthesisBudget(for: profile, budget: budget)
         if PromptPacker.fits(chunks, budget: budget) {
             return SourceContextRenderer.context(
                 title: "Full source contents selected.",
@@ -259,7 +300,7 @@ enum SourceContextPlanner {
             )
         }
 
-        let groups = sectionGroups(for: chunks, budget: budget)
+        let groups = distillationGroups(for: chunks, budget: budget)
         if groups.count > maxIntermediateDistillationGroups {
             let packed = PromptPacker.packForOverview(chunks, budget: budget)
             return SourceContextRenderer.context(
@@ -291,6 +332,7 @@ enum SourceContextPlanner {
             profile: profile,
             chunks: chunks,
             budget: budget,
+            languageInstruction: languageInstruction(user: user, chunks: chunks),
             generateIntermediate: generateIntermediate,
             status: status
         )
@@ -329,6 +371,7 @@ enum SourceContextPlanner {
                 profile: profile,
                 chunks: selected,
                 budget: budget,
+                languageInstruction: languageInstruction(user: user, chunks: chunks),
                 generateIntermediate: generateIntermediate,
                 status: status
             )
@@ -359,6 +402,7 @@ enum SourceContextPlanner {
         profile: ModelProfile,
         chunks: [SourceChunk],
         budget: Int,
+        languageInstruction: String,
         generateIntermediate: IntermediateGenerator,
         status: StatusHandler
     ) async throws -> [SourceChunk] {
@@ -371,6 +415,7 @@ enum SourceContextPlanner {
             budget: budget,
             preserveSections: true,
             maxSummaryTokens: maxSummaryTokens,
+            languageInstruction: languageInstruction,
             generateIntermediate: generateIntermediate,
             status: status
         )
@@ -388,6 +433,7 @@ enum SourceContextPlanner {
                 budget: budget,
                 preserveSections: false,
                 maxSummaryTokens: maxSummaryTokens,
+                languageInstruction: languageInstruction,
                 generateIntermediate: generateIntermediate,
                 status: status
             )
@@ -410,11 +456,12 @@ enum SourceContextPlanner {
         budget: Int,
         preserveSections: Bool,
         maxSummaryTokens: Int,
+        languageInstruction: String,
         generateIntermediate: IntermediateGenerator,
         status: StatusHandler
     ) async throws -> [SourceChunk] {
         let groups = preserveSections
-            ? sectionGroups(for: chunks, budget: budget)
+            ? distillationGroups(for: chunks, budget: budget)
             : budgetGroups(for: chunks, budget: budget)
         var summaries: [SourceChunk] = []
 
@@ -428,7 +475,8 @@ enum SourceContextPlanner {
                 chunks: group,
                 index: index,
                 total: groups.count,
-                maxSummaryTokens: maxSummaryTokens
+                maxSummaryTokens: maxSummaryTokens,
+                languageInstruction: languageInstruction
             )
             let output = try await generateIntermediate(prompt, maxSummaryTokens, 0.1)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -460,7 +508,8 @@ enum SourceContextPlanner {
         chunks: [SourceChunk],
         index: Int,
         total: Int,
-        maxSummaryTokens: Int
+        maxSummaryTokens: Int,
+        languageInstruction: String
     ) -> StudyPromptContent {
         let context = SourceContextRenderer.context(
             title: "Source section \(index + 1) of \(total) selected for intermediate distillation.",
@@ -482,7 +531,7 @@ enum SourceContextPlanner {
             Keep exact facts, names, numbers, formulas, and page/section clues. Fit within about \(maxSummaryTokens) tokens. Do not add outside knowledge.
             """,
             sourceBlocks: context.blocks,
-            closingText: "Return concise markdown notes only. Do not address the student yet.",
+            closingText: "Return concise markdown notes only. Do not address the student yet.\n\n\(languageInstruction)",
             includedImageCount: 0,
             omittedImageCount: 0,
             imageFilenames: [],

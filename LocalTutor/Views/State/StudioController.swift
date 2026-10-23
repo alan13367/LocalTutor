@@ -98,13 +98,7 @@ final class StudioController {
                 )
                 liveGeneration.citations = content.citations
 
-                let request = InferenceRequest(
-                    profile: profile,
-                    runtimePolicy: policy,
-                    promptContent: content,
-                    maxTokens: Self.maxTokens(for: kind, policy: policy),
-                    temperature: kind.isInteractive ? 0.2 : nil
-                )
+                let request = Self.request(for: kind, profile: profile, policy: policy, content: content)
                 let handler: @Sendable (LocalModelRunnerEvent) async -> Void = { [weak self] event in
                     await self?.handle(event, kind: kind, live: liveGeneration, profile: profile)
                 }
@@ -138,6 +132,29 @@ final class StudioController {
     func delete(_ itemID: UUID, in notebookID: UUID) {
         cancel(itemID)
         store.deleteStudioItem(itemID, in: notebookID)
+    }
+
+    nonisolated static let thinkingTokens = 4_096
+
+    nonisolated static func request(
+        for kind: StudyResourceKind,
+        profile: ModelProfile,
+        policy: ModelRuntimePolicy,
+        content: StudyPromptContent
+    ) -> InferenceRequest {
+        let thinking = kind.jsonSchema == nil && !ModelCatalog.disablesThinking(profile)
+        var content = content
+        if thinking {
+            content.systemInstruction = StudyPromptBuilder.thinkingSystemInstruction
+        }
+        return InferenceRequest(
+            profile: profile,
+            runtimePolicy: policy,
+            promptContent: content,
+            maxTokens: maxTokens(for: kind, policy: policy) + (thinking ? thinkingTokens : 0),
+            temperature: kind.isInteractive ? 0.2 : nil,
+            thinking: thinking
+        )
     }
 
     nonisolated static func maxTokens(for kind: StudyResourceKind, policy: ModelRuntimePolicy) -> Int {

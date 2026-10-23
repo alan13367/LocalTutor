@@ -12,6 +12,7 @@ import Foundation
 import PDFKit
 import QuickLookThumbnailing
 import UniformTypeIdentifiers
+import Vision
 import ZIPFoundation
 
 struct ExtractedSource: Sendable {
@@ -270,6 +271,8 @@ enum SourceExtractor {
             let text = clean(page.string ?? "")
             if !text.isEmpty {
                 blocks.append(.text("=== \(source.displayName) \(locator) ===\n\(text)"))
+            } else if let recognized = recognizeText(on: page) {
+                blocks.append(.text("=== \(source.displayName) \(locator) ===\n\(scannedPageNote)\n\(recognized)"))
             }
 
             let shouldRender = text.isEmpty || pageLikelyContainsImage(page)
@@ -356,12 +359,28 @@ enum SourceExtractor {
         return found
     }
 
-    private static func renderPDFPage(_ page: PDFPage, maxSize: CGSize?) -> CIImage? {
+    static let scannedPageNote = "[Scanned or handwritten page: text recognized automatically, formulas may be inaccurate.]"
+
+    private static func recognizeText(on page: PDFPage) -> String? {
+        guard let image = renderPDFPage(page, maxSize: CGSize(width: 2_000, height: 2_000), allowsUpscaling: true) else {
+            return nil
+        }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+        request.automaticallyDetectsLanguage = true
+        try? VNImageRequestHandler(ciImage: image).perform([request])
+        let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+        let text = clean(lines.joined(separator: "\n"))
+        return text.isEmpty ? nil : text
+    }
+
+    private static func renderPDFPage(_ page: PDFPage, maxSize: CGSize?, allowsUpscaling: Bool = false) -> CIImage? {
         let bounds = page.bounds(for: .mediaBox)
         guard bounds.width > 0, bounds.height > 0 else { return nil }
 
         let target = maxSize ?? CGSize(width: 1024, height: 1024)
-        let scale = min(target.width / bounds.width, target.height / bounds.height, 1)
+        let scale = min(target.width / bounds.width, target.height / bounds.height, allowsUpscaling ? .greatestFiniteMagnitude : 1)
         let width = max(1, Int((bounds.width * scale).rounded()))
         let height = max(1, Int((bounds.height * scale).rounded()))
 
