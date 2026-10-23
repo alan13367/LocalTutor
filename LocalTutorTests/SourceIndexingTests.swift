@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import Testing
 @testable import LocalTutor
 
@@ -246,6 +247,58 @@ struct SourceIndexingTests {
 
         #expect(!results.isEmpty)
         #expect(results.allSatisfy { $0.sourceName == "first.md" })
+    }
+
+    @Test("Embedding documents use the nearest heading or the model's untitled prompt")
+    func embeddingDocumentTitle() {
+        var chunk = chunk(id: "1")
+        chunk.headingPath = ["# Biology", "## 2. Cells", "2.1 Membranes"]
+        #expect(EmbeddingDocument(chunk: chunk).title == "2.1 Membranes")
+
+        chunk.headingPath = []
+        let document = EmbeddingDocument(chunk: chunk)
+        #expect(document.title == nil)
+        #expect(
+            LocalEmbeddingRunner.formatted(text: document.text, kind: .document(title: document.title))
+                == "title: none | text: 1"
+        )
+    }
+
+    @Test("Legacy full-text index is rebuilt with stemming")
+    func legacyFullTextIndexMigration() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let databaseURL = root.appendingPathComponent("index.sqlite3")
+        let index = try await makeIndex(
+            root: root,
+            name: "notes.md",
+            text: "# Photosynthesis\n\nThe light reaction splits water."
+        )
+        try await SQLiteSourceIndexRepository(databaseURL: databaseURL).store(index, state: .lexicalOnly)
+
+        var handle: OpaquePointer?
+        try #require(sqlite3_open(databaseURL.path, &handle) == SQLITE_OK)
+        let legacySchema = """
+            DROP TABLE chunk_fts;
+            CREATE VIRTUAL TABLE chunk_fts USING fts5(
+                text, heading, source_name, locator,
+                content='chunks', content_rowid='rowid', tokenize='unicode61'
+            );
+            INSERT INTO chunk_fts(chunk_fts) VALUES('rebuild');
+            PRAGMA user_version = 0;
+            """
+        #expect(sqlite3_exec(handle, legacySchema, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(handle)
+
+        let results = try await SQLiteSourceIndexRepository(databaseURL: databaseURL).lexicalSearch(
+            query: "reactions",
+            fingerprints: [index.fingerprint],
+            limit: 10
+        )
+
+        #expect(results.map(\.id) == index.chunks.map(\.id))
     }
 
     @Test("RRF equals or improves component retrieval metrics")

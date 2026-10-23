@@ -33,6 +33,7 @@ protocol SourceIndexRepository: Sendable {
 
 actor SQLiteSourceIndexRepository: SourceIndexRepository {
     static let shared = SQLiteSourceIndexRepository()
+    static let fullTextSchemaVersion = 1
 
     private let fileManager: FileManager
     private let databaseURL: URL?
@@ -184,7 +185,7 @@ actor SQLiteSourceIndexRepository: SourceIndexRepository {
             JOIN chunks c ON c.rowid = chunk_fts.rowid
             JOIN documents d ON d.id = c.document_id
             WHERE chunk_fts MATCH ? AND d.fingerprint_key IN (\(placeholders))
-            ORDER BY bm25(chunk_fts)
+            ORDER BY bm25(chunk_fts, 1.0, 2.0, 0.2, 0.2)
             LIMIT ?
             """
         var bindings: [SQLiteBinding] = [.text(match)]
@@ -379,14 +380,22 @@ actor SQLiteSourceIndexRepository: SourceIndexRepository {
             )
             """
         )
+        let rebuildsFullText = try scalarInt("PRAGMA user_version") < Self.fullTextSchemaVersion
+        if rebuildsFullText {
+            try execute("DROP TABLE IF EXISTS chunk_fts")
+        }
         try execute(
             """
             CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
                 text, heading, source_name, locator,
-                content='chunks', content_rowid='rowid', tokenize='unicode61'
+                content='chunks', content_rowid='rowid', tokenize='porter unicode61'
             )
             """
         )
+        if rebuildsFullText {
+            try execute("INSERT INTO chunk_fts(chunk_fts) VALUES('rebuild')")
+            try execute("PRAGMA user_version = \(Self.fullTextSchemaVersion)")
+        }
         try execute(
             """
             CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN

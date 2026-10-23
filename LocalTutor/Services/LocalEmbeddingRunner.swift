@@ -37,12 +37,18 @@ struct EmbeddingDocument: Sendable {
     var text: String
 }
 
+extension EmbeddingDocument {
+    init(chunk: SourceChunk) {
+        self.init(title: chunk.headingTitle, text: chunk.text)
+    }
+}
+
 actor LocalEmbeddingRunner: EmbeddingService {
     static let shared = LocalEmbeddingRunner()
     static let dimension = 768
     static let maximumBatchSize = 8
     static let maximumBatchTokens = 1_024
-    static let promptVersion = 1
+    static let promptVersion = 2
 
     private let modelDownloadService: ManagedModelDownloadService
     private var activeContainer: EmbedderModelContainer?
@@ -104,7 +110,7 @@ actor LocalEmbeddingRunner: EmbeddingService {
         case .query:
             "task: search result | query: \(text)"
         case .document(let title):
-            "title: \(title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled") | text: \(text)"
+            "title: \(title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "none") | text: \(text)"
         }
     }
 

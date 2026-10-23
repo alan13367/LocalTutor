@@ -19,6 +19,7 @@
 		8A1B2C3D4E5F6A7B8C9D0E1F /* InlineLatexRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A1B2C3D4E5F6A7B8C9D0E2F /* InlineLatexRendererTests.swift */; };
 		9C7A94C1E43A4F1FAE9A3210 /* MarkdownParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C7A94C0E43A4F1FAE9A3210 /* MarkdownParserTests.swift */; };
 		A03066B0FB5FBBDBF0C923CF /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = F26D2627FCE126D846B704E9 /* MLXLLM */; };
+		B7E1C0DE00000000000000A1 /* RetrievalBenchmarkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E1C0DE00000000000000A2 /* RetrievalBenchmarkTests.swift */; };
 		ABCDEF0123456789ABCDEF01 /* SourceIndexingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABCDEF0123456789ABCDEF02 /* SourceIndexingTests.swift */; };
 		B64FE2EE5C6B00CD8FC76275 /* BenchmarkRecordTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E297C2228A7488B9848689E /* BenchmarkRecordTests.swift */; };
 		CABA406B6BCA80B097963C0B /* LocalModelRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69A0AC9384D73E9C72DEA760 /* LocalModelRunnerTests.swift */; };
@@ -48,6 +49,7 @@
 		72375BAF9CA0C8D0980218C1 /* LocalTutorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LocalTutorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8A1B2C3D4E5F6A7B8C9D0E2F /* InlineLatexRendererTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InlineLatexRendererTests.swift; sourceTree = "<group>"; };
 		9C7A94C0E43A4F1FAE9A3210 /* MarkdownParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarkdownParserTests.swift; sourceTree = "<group>"; };
+		B7E1C0DE00000000000000A2 /* RetrievalBenchmarkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RetrievalBenchmarkTests.swift; sourceTree = "<group>"; };
 		ABCDEF0123456789ABCDEF02 /* SourceIndexingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SourceIndexingTests.swift; sourceTree = "<group>"; };
 		E18B94AB0EFC8197AE0BDFF7 /* MemoryPreflightTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryPreflightTests.swift; sourceTree = "<group>"; };
 		E74411EA2FC83B2900FB6366 /* LocalTutor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LocalTutor.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -120,6 +122,7 @@
 				3B4C5D6E7F8091A2B3C4D5E7 /* NotebookTests.swift */,
 				4C5D6E7F8091A2B3C4D5E6F8 /* ModelIntegrationTests.swift */,
 				F21C4FB1BA220000BA220000 /* SourceExtractorTests.swift */,
+				B7E1C0DE00000000000000A2 /* RetrievalBenchmarkTests.swift */,
 				ABCDEF0123456789ABCDEF02 /* SourceIndexingTests.swift */,
 			);
 			path = LocalTutorTests;
@@ -251,6 +254,7 @@
 				3B4C5D6E7F8091A2B3C4D5E6 /* NotebookTests.swift in Sources */,
 				4C5D6E7F8091A2B3C4D5E6F7 /* ModelIntegrationTests.swift in Sources */,
 				F21C4FB1BA110000BA110000 /* SourceExtractorTests.swift in Sources */,
+				B7E1C0DE00000000000000A1 /* RetrievalBenchmarkTests.swift in Sources */,
 				ABCDEF0123456789ABCDEF01 /* SourceIndexingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

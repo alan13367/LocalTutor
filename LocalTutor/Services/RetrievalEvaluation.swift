@@ -1,6 +1,7 @@
 import Foundation
 
 struct RetrievalEvaluationMetrics: Equatable, Sendable {
+    var hitAtOne: Double
     var recallAtFive: Double
     var meanReciprocalRankAtTen: Double
 }
@@ -11,15 +12,19 @@ enum RetrievalEvaluator {
         relevantChunkIDs: [Set<String>]
     ) -> RetrievalEvaluationMetrics {
         guard rankedChunkIDs.count == relevantChunkIDs.count, !rankedChunkIDs.isEmpty else {
-            return RetrievalEvaluationMetrics(recallAtFive: 0, meanReciprocalRankAtTen: 0)
+            return RetrievalEvaluationMetrics(hitAtOne: 0, recallAtFive: 0, meanReciprocalRankAtTen: 0)
         }
+        var hits = 0.0
         var recall = 0.0
         var reciprocalRank = 0.0
 
         for (ranked, relevant) in zip(rankedChunkIDs, relevantChunkIDs) {
             guard !relevant.isEmpty else { continue }
-            let hits = Set(ranked.prefix(5)).intersection(relevant).count
-            recall += Double(hits) / Double(relevant.count)
+            if let first = ranked.first, relevant.contains(first) {
+                hits += 1
+            }
+            let found = Set(ranked.prefix(5)).intersection(relevant).count
+            recall += Double(found) / Double(relevant.count)
             if let rank = ranked.prefix(10).firstIndex(where: relevant.contains) {
                 reciprocalRank += 1 / Double(rank + 1)
             }
@@ -27,6 +32,7 @@ enum RetrievalEvaluator {
 
         let count = Double(rankedChunkIDs.count)
         return RetrievalEvaluationMetrics(
+            hitAtOne: hits / count,
             recallAtFive: recall / count,
             meanReciprocalRankAtTen: reciprocalRank / count
         )

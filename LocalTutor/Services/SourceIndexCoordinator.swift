@@ -43,7 +43,7 @@ actor SourceIndexCoordinator {
     init(
         repository: any SourceIndexRepository = SQLiteSourceIndexRepository.shared,
         embeddingService: any EmbeddingService = LocalEmbeddingRunner.shared,
-        idleUnloadDelay: Duration = .seconds(20)
+        idleUnloadDelay: Duration = .seconds(180)
     ) {
         self.repository = repository
         self.embeddingService = embeddingService
@@ -159,9 +159,7 @@ actor SourceIndexCoordinator {
                 let end = min(index.chunks.count, start + LocalEmbeddingRunner.maximumBatchSize)
                 let chunks = Array(index.chunks[start..<end])
                 let vectors = try await embeddingService.embedDocuments(
-                    chunks.map {
-                        EmbeddingDocument(title: $0.headingTitle, text: $0.text)
-                    }
+                    chunks.map(EmbeddingDocument.init(chunk:))
                 )
                 for (chunk, vector) in zip(chunks, vectors) {
                     stored[chunk.id] = vector

@@ -53,6 +53,7 @@ LocalTutorTests/  Swift Testing tests
 - `#if DEBUG` for debug-only surfaces (e.g. the Model Lab window)
 - The app folder uses file system sync; test files in `LocalTutorTests/` still need pbxproj entries
 - Real-model checks: `TEST_RUNNER_LOCALTUTOR_INTEGRATION=1 xcodebuild test -only-testing:LocalTutorTests/ModelIntegrationTests` (downloads a model; `TEST_RUNNER_LOCALTUTOR_INTEGRATION_MODEL=<catalog id>` to pick one)
+- Retrieval benchmark: `-only-testing:LocalTutorTests/RetrievalBenchmarkTests` prints `[benchmark]` hit@1 / recall@5 / MRR@10 lines; lexical always runs, dense + hybrid need `TEST_RUNNER_LOCALTUTOR_INTEGRATION=1` (downloads EmbeddingGemma 2)
 
 ## Status
 
