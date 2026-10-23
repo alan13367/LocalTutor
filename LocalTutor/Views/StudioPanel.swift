@@ -10,11 +10,10 @@ struct StudioPanel: View {
     let notebook: Notebook
 
     @State private var focus = ""
-    @State private var editingNote: StudyNote?
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 20) {
                 generators
                 if !dueCards.isEmpty || !notebook.allFlashcards.isEmpty {
                     reviewCard
@@ -25,9 +24,10 @@ struct StudioPanel: View {
             .padding(16)
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
-        .sheet(item: $editingNote) { note in
-            NoteEditorView(notebookID: notebook.id, note: note)
-        }
+    }
+
+    private var stage: WorkspaceStage {
+        app.stage(in: notebook)
     }
 
     private var dueCards: [Flashcard] {
@@ -37,23 +37,36 @@ struct StudioPanel: View {
     // MARK: Generators
 
     private var generators: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Studio")
-                .font(.headline)
-            TextField("Focus (optional), e.g. \"Chapter 3\"", text: $focus)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-                .accessibilityLabel("Focus topic for generated materials")
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Studio")
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                if runningCount > 0 {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text("\(runningCount) creating")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .transition(.opacity)
+                }
+            }
+            focusField
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
                 ForEach(StudyResourceKind.studioKinds) { kind in
+                    let isCreating = notebook.runningStudioItem(of: kind) != nil
                     Button {
-                        generate(kind)
+                        app.createStudioItem(kind, focus: focus, in: notebook.id)
                     } label: {
-                        VStack(spacing: 6) {
+                        VStack(spacing: 7) {
                             Image(systemName: kind.systemImage)
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(.tint)
-                                .frame(height: 20)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(kind.tint)
+                                .symbolEffect(.pulse, options: .repeating, isActive: isCreating)
+                                .frame(width: 32, height: 32)
+                                .background(Circle().fill(kind.tint.opacity(0.14)))
+                                .overlay(Circle().strokeBorder(kind.tint.opacity(isCreating ? 0.6 : 0), lineWidth: 1.5))
                             Text(kind.title)
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.primary)
@@ -62,19 +75,52 @@ struct StudioPanel: View {
                                 .minimumScaleFactor(0.85)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
+                        .padding(.top, 10)
+                        .padding(.bottom, 6)
                         .padding(.horizontal, 4)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
-                    .disabled(!canGenerate)
-                    .help(canGenerate ? "\(kind.title): \(kind.shortDescription)" : disabledReason)
-                    .accessibilityLabel("Create \(kind.title)")
+                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 14))
+                    .disabled(!canGenerate && !isCreating)
+                    .help(isCreating ? "\(kind.title) is being created. Click to open it." : (canGenerate ? "\(kind.title): \(kind.shortDescription)" : disabledReason))
+                    .accessibilityLabel(isCreating ? "Open \(kind.title) being created" : "Create \(kind.title)")
                     .accessibilityHint(kind.shortDescription)
                 }
             }
         }
+    }
+
+    private var focusField: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "scope")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(focus.isEmpty ? Color.secondary : Color.accentColor)
+                .accessibilityHidden(true)
+            TextField("Focus on a topic (optional)", text: $focus)
+                .textFieldStyle(.plain)
+                .font(.callout)
+                .accessibilityLabel("Focus topic for generated materials")
+            if !focus.isEmpty {
+                Button {
+                    focus = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear focus")
+                .accessibilityLabel("Clear focus")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.05)))
+        .help("Created items concentrate on this topic, e.g. \"Chapter 3\"")
+    }
+
+    private var runningCount: Int {
+        notebook.studioItems.filter(\.isRunning).count
     }
 
     private var canGenerate: Bool {
@@ -85,38 +131,35 @@ struct StudioPanel: View {
         app.models.selectedProfile == nil ? "Choose a model in Settings first" : "Add or select a source first"
     }
 
-    private func generate(_ kind: StudyResourceKind) {
-        if let id = app.studio.generate(kind, focus: focus, in: notebook.id) {
-            if kind.isInteractive || kind == .studyGuide || kind == .briefing {
-                app.openedStudioItemID = id
-            }
-        }
-    }
-
     // MARK: Review
 
     private var reviewCard: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "calendar.badge.clock")
-                .font(.title2)
-                .foregroundStyle(dueCards.isEmpty ? Color.secondary : Color.orange)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(dueCards.isEmpty ? "All caught up" : "\(dueCards.count) card\(dueCards.count == 1 ? "" : "s") due")
-                    .font(.callout.weight(.semibold))
-                Text("Spaced repetition across \(notebook.allFlashcards.count) flashcards")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        Button {
+            app.stage = .flashcardReview
+        } label: {
+            HStack(spacing: 12) {
+                StudioBadge(symbol: StudioStyle.reviewSymbol, tint: dueCards.isEmpty ? .secondary : StudioStyle.reviewTint, size: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(dueCards.isEmpty ? "All caught up" : "\(dueCards.count) card\(dueCards.count == 1 ? "" : "s") due")
+                        .font(.callout.weight(.semibold))
+                    Text("Spaced repetition · \(notebook.allFlashcards.count) cards")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if !dueCards.isEmpty {
+                    Text("Review")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(StudioStyle.reviewTint)
+                }
             }
-            Spacer()
-            Button("Review") {
-                app.isShowingFlashcardReview = true
-            }
-            .buttonStyle(.glassProminent)
-            .disabled(dueCards.isEmpty)
+            .padding(12)
+            .contentShape(Rectangle())
         }
-        .padding(12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        .buttonStyle(.plain)
+        .glassEffect(.regular.tint(stage == .flashcardReview ? StudioStyle.reviewTint.opacity(0.2) : .clear).interactive(), in: .rect(cornerRadius: 14))
+        .disabled(dueCards.isEmpty)
+        .accessibilityLabel(dueCards.isEmpty ? "All flashcards caught up" : "Review \(dueCards.count) due flashcards")
     }
 
     // MARK: Outputs
@@ -124,13 +167,15 @@ struct StudioPanel: View {
     @ViewBuilder
     private var outputs: some View {
         if !notebook.studioItems.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Created")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                sectionTitle("Created")
                 ForEach(notebook.studioItems) { item in
-                    StudioItemRow(item: item, live: app.studio.liveGeneration(for: item.id)) {
-                        app.openedStudioItemID = item.id
+                    StudioItemRow(
+                        item: item,
+                        live: app.studio.liveGeneration(for: item.id),
+                        isSelected: stage == .studioItem(item.id)
+                    ) {
+                        app.openStudioItem(item.id)
                     } onCancel: {
                         app.studio.cancel(item.id)
                     } onDelete: {
@@ -141,19 +186,23 @@ struct StudioPanel: View {
         }
     }
 
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+    }
+
     // MARK: Notes
 
     private var notes: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Notes")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                sectionTitle("Notes")
                 Spacer()
                 Button {
                     let note = StudyNote(title: "New note", markdown: "")
                     app.store.addNote(note, to: notebook.id)
-                    editingNote = note
+                    app.stage = .note(note.id)
                 } label: {
                     Label("New Note", systemImage: "plus")
                         .labelStyle(.iconOnly)
@@ -168,23 +217,28 @@ struct StudioPanel: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(notebook.notes) { note in
+                let isSelected = stage == .note(note.id)
                 Button {
-                    editingNote = note
+                    app.stage = .note(note.id)
                 } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(note.title)
-                            .font(.callout.weight(.medium))
-                            .lineLimit(1)
-                        Text(note.markdown.isEmpty ? "Empty note" : note.markdown)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                    HStack(alignment: .top, spacing: 10) {
+                        StudioBadge(symbol: StudioStyle.noteSymbol, tint: StudioStyle.noteTint, size: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(note.title)
+                                .font(.callout.weight(.medium))
+                                .lineLimit(1)
+                            Text(note.markdown.isEmpty ? "Empty note" : note.markdown)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
+                    .padding(8)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .background(StudioRowBackground(tint: StudioStyle.noteTint, isSelected: isSelected))
                 .contextMenu {
                     Button("Delete Note", role: .destructive) {
                         app.store.deleteNote(note.id, in: notebook.id)
@@ -195,9 +249,25 @@ struct StudioPanel: View {
     }
 }
 
+private struct StudioRowBackground: View {
+    let tint: Color
+    let isSelected: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .fill(isSelected ? tint.opacity(0.16) : Color.primary.opacity(0.04))
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(isSelected ? tint.opacity(0.45) : .clear, lineWidth: 1)
+            )
+            .animation(.easeOut(duration: 0.18), value: isSelected)
+    }
+}
+
 private struct StudioItemRow: View {
     let item: StudioItem
     let live: LiveGeneration?
+    let isSelected: Bool
     var onOpen: () -> Void
     var onCancel: () -> Void
     var onDelete: () -> Void
@@ -205,11 +275,7 @@ private struct StudioItemRow: View {
     var body: some View {
         Button(action: onOpen) {
             HStack(spacing: 10) {
-                Image(systemName: item.kind.systemImage)
-                    .foregroundStyle(.tint)
-                    .frame(width: 26, height: 26)
-                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.accentColor.opacity(0.12)))
-                    .accessibilityHidden(true)
+                StudioBadge(symbol: item.kind.systemImage, tint: item.kind.tint, size: 28, isWorking: item.isRunning)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.title)
                         .font(.callout.weight(.medium))
@@ -230,7 +296,7 @@ private struct StudioItemRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
+        .background(StudioRowBackground(tint: item.kind.tint, isSelected: isSelected))
         .contextMenu {
             Button("Open", action: onOpen)
             Divider()
@@ -241,105 +307,25 @@ private struct StudioItemRow: View {
     @ViewBuilder
     private var subtitle: some View {
         if item.isRunning {
-            HStack(spacing: 5) {
-                ProgressView().controlSize(.mini)
-                Text(live?.statusMessage ?? item.statusMessage)
-                    .lineLimit(1)
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+            Text(live?.statusMessage ?? item.statusMessage)
+                .font(.caption2)
+                .foregroundStyle(item.kind.tint)
+                .lineLimit(1)
         } else if case .failed = item.status {
             Text("Failed · click for details")
                 .font(.caption2)
                 .foregroundStyle(.orange)
         } else {
-            Text("\(item.kind.title) · \(item.statusMessage) · \(item.createdAt.formatted(.relative(presentation: .named)))")
+            Text(caption)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
     }
-}
 
-struct NoteEditorView: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.dismiss) private var dismiss
-    let notebookID: UUID
-    let note: StudyNote
-
-    @State private var title = ""
-    @State private var markdown = ""
-    @State private var isPreviewing = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                TextField("Title", text: $title)
-                    .textFieldStyle(.plain)
-                    .font(.title2.weight(.semibold))
-                Picker("Mode", selection: $isPreviewing) {
-                    Text("Edit").tag(false)
-                    Text("Preview").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 160)
-            }
-            .padding(20)
-            Divider()
-            if isPreviewing {
-                ScrollView {
-                    MarkdownText(text: markdown, citationCount: note.citations.count)
-                        .environment(\.openURL, OpenURLAction { url in
-                            if let index = CitationLinker.citationIndex(from: url) {
-                                app.openCitation(index, in: note.citations)
-                                return .handled
-                            }
-                            return .systemAction
-                        })
-                        .padding(20)
-                }
-            } else {
-                TextEditor(text: $markdown)
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    .padding(14)
-            }
-            Divider()
-            HStack {
-                Button("Delete", role: .destructive) {
-                    app.store.deleteNote(note.id, in: notebookID)
-                    dismiss()
-                }
-                Spacer()
-                Button("Done") {
-                    save()
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.glassProminent)
-            }
-            .padding(14)
-        }
-        .frame(minWidth: 640, minHeight: 520)
-        .onAppear {
-            title = note.title
-            markdown = note.markdown
-            isPreviewing = !note.markdown.isEmpty
-        }
-        .onDisappear(perform: save)
-    }
-
-    private func save() {
-        let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
-        if markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, trimmedTitle.isEmpty || trimmedTitle == "New note" {
-            app.store.deleteNote(note.id, in: notebookID)
-            return
-        }
-        guard title != note.title || markdown != note.markdown else { return }
-        app.store.updateNote(note.id, in: notebookID) { stored in
-            stored.title = title.isEmpty ? "Untitled note" : title
-            stored.markdown = markdown
-        }
+    private var caption: String {
+        [item.kind.title, item.payload?.itemCountDescription, item.createdAt.formatted(.relative(presentation: .named))]
+            .compactMap { $0 }
+            .joined(separator: " · ")
     }
 }

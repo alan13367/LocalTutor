@@ -60,11 +60,16 @@ final class ModelManager {
     var isGenerationActive: () -> Bool = { false }
     var onError: (String) -> Void = { _ in }
 
+    private(set) var speculativeDecodingChoices: [String: Bool] {
+        didSet { UserDefaults.standard.set(speculativeDecodingChoices, forKey: AppStorageKeys.speculativeDecodingByModel) }
+    }
+
     var useSpeculativeDecoding: Bool {
-        didSet {
-            UserDefaults.standard.set(useSpeculativeDecoding, forKey: AppStorageKeys.useSpeculativeDecoding)
-            let enabled = useSpeculativeDecoding
-            Task { await inferenceService.setSpeculativeDecoding(enabled) }
+        get { selectedProfile.map(usesSpeculativeDecoding) ?? false }
+        set {
+            guard let profile = selectedProfile else { return }
+            speculativeDecodingChoices[profile.id] = newValue
+            syncSpeculativeDecoding(for: profile)
         }
     }
 
@@ -78,6 +83,7 @@ final class ModelManager {
     @ObservationIgnored private var dismissTask: Task<Void, Never>?
     @ObservationIgnored private var cacheRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var cacheInfoLoadedAt: Date?
+    @ObservationIgnored private var appliedSpeculativeDecoding: Bool?
 
     init(
         inferenceService: any InferenceService,
@@ -99,9 +105,30 @@ final class ModelManager {
         self.downloadService = downloadService
         storedProfileID = UserDefaults.standard.string(forKey: AppStorageKeys.selectedProfileID) ?? ""
         contextPreference = .current
-        useSpeculativeDecoding = UserDefaults.standard.object(forKey: AppStorageKeys.useSpeculativeDecoding) as? Bool ?? true
+        speculativeDecodingChoices = SpeculativeDecodingPreference.storedChoices
         refreshCacheInfo(force: true)
         restorePausedDownload()
+    }
+
+    func usesSpeculativeDecoding(_ profile: ModelProfile) -> Bool {
+        SpeculativeDecodingPreference.isEnabled(
+            for: profile,
+            choices: speculativeDecodingChoices,
+            legacyChoice: SpeculativeDecodingPreference.legacyChoice
+        )
+    }
+
+    private func speculativeDecodingChange(for profile: ModelProfile?) -> Bool? {
+        let enabled = profile.map(usesSpeculativeDecoding) ?? false
+        guard appliedSpeculativeDecoding != enabled else { return nil }
+        appliedSpeculativeDecoding = enabled
+        return enabled
+    }
+
+    private func syncSpeculativeDecoding(for profile: ModelProfile?) {
+        guard let enabled = speculativeDecodingChange(for: profile) else { return }
+        let inferenceService = inferenceService
+        Task { await inferenceService.setSpeculativeDecoding(enabled) }
     }
 
     // MARK: - Selection
@@ -126,7 +153,9 @@ final class ModelManager {
     }
 
     var runtimePolicy: ModelRuntimePolicy? {
-        selectedProfile.map { ModelRuntimePolicyProvider.policy(for: $0, preference: contextPreference) }
+        selectedProfile.map {
+            ModelRuntimePolicyProvider.policy(for: $0, preference: contextPreference, speculative: usesSpeculativeDecoding($0))
+        }
     }
 
     var supportsVision: Bool {
@@ -154,6 +183,8 @@ final class ModelManager {
         storedProfileID = profile.id
         if preload {
             startPreload(for: profile)
+        } else {
+            syncSpeculativeDecoding(for: profile)
         }
     }
 
@@ -251,9 +282,10 @@ final class ModelManager {
         if pausingProfileID == profile.id {
             pausingProfileID = nil
         }
-        let policy = ModelRuntimePolicyProvider.policy(for: profile, preference: contextPreference)
+        let policy = ModelRuntimePolicyProvider.policy(for: profile, preference: contextPreference, speculative: usesSpeculativeDecoding(profile))
         guard MemoryPreflight.evaluate(policy: policy).canRun else { return }
         if preloadProfileID == profile.id, preloadTask != nil { return }
+        let speculativeChange = speculativeDecodingChange(for: profile)
 
         preloadTask?.cancel()
         dismissTask?.cancel()
@@ -268,6 +300,9 @@ final class ModelManager {
 
         let inferenceService = inferenceService
         preloadTask = Task { [weak self] in
+            if let speculativeChange {
+                await inferenceService.setSpeculativeDecoding(speculativeChange)
+            }
             do {
                 try await inferenceService.preload(profile: profile, runtimePolicy: policy) { [weak self] event in
                     await self?.handleLoadEvent(event, profile: profile)
@@ -374,18 +409,28 @@ final class ModelManager {
         Task { [weak self] in
             let pending = await downloadService.pendingDownloads()
             guard let self, self.downloadStatus == nil else { return }
-            let preferred = pending.first { $0.profileID == self.selectedProfile?.id } ?? pending.first
+            let selectedIDs = [self.selectedProfile?.id, self.selectedProfile?.drafterProfile?.id].compactMap { $0 }
+            let preferred = pending.first { selectedIDs.contains($0.profileID) } ?? pending.first
             guard let preferred,
-                  let profile = ModelProfile.profile(withID: preferred.profileID),
+                  let profile = ModelProfile.profile(withID: preferred.profileID)
+                    ?? ModelProfile.profile(owningDrafterID: preferred.profileID),
                   preferred.writtenBytes > 0 else { return }
+            let fraction = self.pausedFraction(for: preferred, of: profile)
             self.downloadStatus = ModelDownloadStatus(
                 profileID: profile.id,
                 profileName: profile.name,
-                message: Self.pausedMessage(fraction: preferred.fraction),
-                fraction: preferred.fraction,
+                message: Self.pausedMessage(fraction: fraction),
+                fraction: fraction,
                 phase: .paused
             )
         }
+    }
+
+    private func pausedFraction(for pending: PendingModelDownload, of profile: ModelProfile) -> Double? {
+        guard let fraction = pending.fraction else { return nil }
+        guard usesSpeculativeDecoding(profile) else { return fraction }
+        let bundle = ModelBundleProgress(modelBytes: profile.downloadBytes, drafterBytes: profile.drafterBytes)
+        return bundle.fraction(fraction, of: pending.profileID == profile.id ? .model : .drafter)
     }
 
     func handleLoadEvent(_ event: LocalModelRunnerEvent, profile: ModelProfile) {

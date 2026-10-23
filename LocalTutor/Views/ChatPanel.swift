@@ -12,23 +12,46 @@ struct ChatPanel: View {
     var onAddSources: () -> Void
 
     var body: some View {
-        let chat = app.store.selectedChat(in: notebook.id)
+        let stage = app.stage(in: notebook)
         VStack(spacing: 0) {
-            if let chat, !chat.turns.isEmpty {
-                ChatTranscript(notebook: notebook, chat: chat)
-                    .frame(maxHeight: .infinity)
-            } else {
-                ChatEmptyState(notebook: notebook, onAddSources: onAddSources)
-                    .frame(maxHeight: .infinity)
+            stageContent(stage)
+                .id(stage)
+                .transition(.blurReplace)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if stage.showsComposer {
+                ChatComposer(notebook: notebook, isShowingTool: stage != .chat)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
+                    .padding(.top, 6)
+                    .frame(maxWidth: 860)
+                    .frame(maxWidth: .infinity)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            ChatComposer(notebook: notebook)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 16)
-                .padding(.top, 6)
-                .frame(maxWidth: 860)
-                .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.smooth(duration: 0.32), value: stage)
+    }
+
+    @ViewBuilder
+    private func stageContent(_ stage: WorkspaceStage) -> some View {
+        switch stage {
+        case .chat:
+            if let chat = app.store.selectedChat(in: notebook.id), !chat.turns.isEmpty {
+                ChatTranscript(notebook: notebook, chat: chat)
+            } else {
+                ChatEmptyState(notebook: notebook, onAddSources: onAddSources)
+            }
+        case .studioItem(let id):
+            if let item = notebook.studioItems.first(where: { $0.id == id }) {
+                StudioItemStage(notebook: notebook, item: item)
+            }
+        case .note(let id):
+            if let note = notebook.notes.first(where: { $0.id == id }) {
+                NoteStage(notebookID: notebook.id, note: note)
+            }
+        case .flashcardReview:
+            FlashcardReviewStage(notebook: notebook)
+        }
     }
 }
 
@@ -43,12 +66,14 @@ struct ChatThreadMenu: View {
         Menu {
             Button("New Chat", systemImage: "square.and.pencil") {
                 app.store.newChat(in: notebook.id)
+                app.showChat()
             }
             .disabled(app.chat.isGenerating)
             Divider()
             ForEach(notebook.chats.sorted { $0.updatedAt > $1.updatedAt }) { chat in
                 Button {
                     app.store.selectedChatIDs[notebook.id] = chat.id
+                    app.showChat()
                 } label: {
                     if chat.id == current?.id {
                         Label(chat.displayTitle, systemImage: "checkmark")
@@ -82,6 +107,12 @@ private struct ChatTranscript: View {
     @State private var isAtBottom = true
 
     var body: some View {
+        GeometryReader { proxy in
+            transcript(minHeight: proxy.size.height)
+        }
+    }
+
+    private func transcript(minHeight: CGFloat) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 ForEach(chat.turns) { turn in
@@ -102,10 +133,11 @@ private struct ChatTranscript: View {
             .padding(.vertical, 24)
             .frame(maxWidth: 860, alignment: .leading)
             .frame(maxWidth: .infinity)
+            .frame(minHeight: minHeight, alignment: .bottom)
         }
         .scrollPosition($position)
         .defaultScrollAnchor(.bottom)
-        .scrollEdgeEffectStyle(.soft, for: .bottom)
+        .scrollEdgeEffectStyle(.soft, for: .vertical)
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 60
         } action: { _, atBottom in
@@ -125,22 +157,24 @@ private struct ChatTranscript: View {
             position.scrollTo(edge: .bottom)
         }
         .overlay(alignment: .bottom) {
-            if !isAtBottom {
-                Button {
-                    withAnimation(.easeOut(duration: 0.25)) {
-                        position.scrollTo(edge: .bottom)
+            ZStack {
+                if !isAtBottom {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            position.scrollTo(edge: .bottom)
+                        }
+                    } label: {
+                        Label("Jump to latest", systemImage: "arrow.down")
+                            .font(.callout.weight(.medium))
+                            .padding(.horizontal, 4)
                     }
-                } label: {
-                    Label("Jump to latest", systemImage: "arrow.down")
-                        .font(.callout.weight(.medium))
-                        .padding(.horizontal, 4)
+                    .buttonStyle(.glass)
+                    .padding(.bottom, 10)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-                .buttonStyle(.glass)
-                .padding(.bottom, 10)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+            .animation(.easeOut(duration: 0.15), value: isAtBottom)
         }
-        .animation(.easeOut(duration: 0.15), value: isAtBottom)
     }
 
     private var refinementSuggestions: [RefinementSuggestion]? {
@@ -378,6 +412,7 @@ private struct ChatEmptyState: View {
                         .controlSize(.large)
                 } else {
                     suggestions
+                    studyTools
                 }
                 Spacer(minLength: 20)
             }
@@ -430,6 +465,58 @@ private struct ChatEmptyState: View {
             }
         }
     }
+
+    private static let featuredKinds: [StudyResourceKind] = [.studyGuide, .flashcards, .quiz, .mindMap, .audioOverview]
+
+    private var studyTools: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 12) {
+                line
+                Text("or start with a study tool")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                line
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { studyToolChips }
+                FlowLayout(spacing: 8) { studyToolChips }
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private var line: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.1))
+            .frame(height: 1)
+            .frame(maxWidth: 120)
+    }
+
+    private var studyToolChips: some View {
+        ForEach(Self.featuredKinds) { kind in
+            Button {
+                app.createStudioItem(kind, in: notebook.id)
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: kind.systemImage)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(kind.tint)
+                        .accessibilityHidden(true)
+                    Text(kind.title)
+                        .font(.callout.weight(.medium))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .capsule)
+            .disabled(app.models.selectedProfile == nil || notebook.enabledSources.isEmpty)
+            .help("\(kind.title): \(kind.shortDescription)")
+            .accessibilityLabel("Create \(kind.title)")
+        }
+    }
 }
 
 // MARK: - Composer
@@ -437,6 +524,7 @@ private struct ChatEmptyState: View {
 private struct ChatComposer: View {
     @Environment(AppModel.self) private var app
     let notebook: Notebook
+    var isShowingTool = false
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -490,6 +578,9 @@ private struct ChatComposer: View {
         if app.chat.willAnswerWithSystemModel {
             return "Ask now: Apple Intelligence answers until your model is downloaded"
         }
+        if isShowingTool {
+            return "Ask a follow-up in chat…"
+        }
         if notebook.enabledSources.isEmpty {
             return "Ask anything, or add sources to ground answers"
         }
@@ -497,6 +588,8 @@ private struct ChatComposer: View {
     }
 
     private func send() {
+        guard app.chat.canSend(in: notebook) else { return }
+        app.showChat()
         app.chat.send(in: notebook.id)
     }
 }

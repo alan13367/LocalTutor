@@ -185,7 +185,34 @@
       "maxContextTokens": 262144,
       "documentImageLimit": 8,
       "drafterRepository": "mlx-community/gemma-4-26B-A4B-it-assistant-bf16",
-      "drafterBytes": 872000000
+      "drafterBytes": 872000000,
+      "speculativeDecodingByDefault": false
+    },
+    {
+      "id": "flint40B_A2B",
+      "name": "Flint 40B-A2.5B",
+      "subtitle": "Reasoning mixture of experts for 32 GB+ Macs",
+      "repository": "mlx-community/flint-mixed-3-4bit",
+      "loader": "llm",
+      "kind": "text",
+      "tier": "thirtyTwoGB",
+      "publisher": "Recursive",
+      "summary": "40B-parameter MoE with 2.5B active per token that thinks before it answers. Strong on code, math and technical coursework over readable source text.",
+      "parameterScale": "40B total / 2.5B active · 3-bit MLX",
+      "strengths": [
+        "Text-only",
+        "Reasoning",
+        "Code & math"
+      ],
+      "recommended": false,
+      "downloadBytes": 17849000000,
+      "kvBytesPerToken": 28672,
+      "maxContextTokens": 262144,
+      "maxTokens": 8192,
+      "temperature": 1.0,
+      "topP": 0.95,
+      "topK": 20,
+      "quantizeKVCache": false
     }
   ]
 }

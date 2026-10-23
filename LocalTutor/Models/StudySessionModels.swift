@@ -478,7 +478,7 @@ struct StudySession: Identifiable, Equatable, Codable {
 }
 
 struct RefinementSuggestion: Identifiable, Equatable {
-    let id = UUID()
+    var id: String { label }
     var label: String
     var systemImage: String
     var instruction: String

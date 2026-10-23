@@ -50,6 +50,7 @@ private struct ModelsSettingsPane: View {
                         .foregroundStyle(.secondary)
                 }
                 Toggle("Faster generation (multi-token prediction)", isOn: $models.useSpeculativeDecoding)
+                    .disabled(!(app.models.selectedProfile?.supportsSpeculativeDecoding ?? false))
                 Text(speculativeDetail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -92,7 +93,10 @@ private struct ModelsSettingsPane: View {
             return "\(profile.name) has no multi-token prediction drafter yet."
         }
         let size = ByteCountFormatter.string(fromByteCount: Int64(profile.drafterBytes), countStyle: .file)
-        return "Adds a \(size) drafter to \(profile.name) that predicts several tokens at once, so answers and study materials stream noticeably faster."
+        guard profile.speculativeDecodingByDefault else {
+            return "Off by default for \(profile.name): checking drafted tokens wakes extra experts in this mixture-of-experts model, so it writes faster without the \(size) drafter. Applies to \(profile.name) only."
+        }
+        return "Adds a \(size) drafter to \(profile.name) that predicts several tokens at once, so answers and study materials stream noticeably faster. Applies to \(profile.name) only."
     }
 }
 

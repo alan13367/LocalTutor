@@ -65,15 +65,13 @@ struct LocalTutorCommands: Commands {
             ForEach(StudyResourceKind.studioKinds) { kind in
                 Button("Create \(kind.title)") {
                     guard let id = app.store.selectedNotebookID else { return }
-                    if let itemID = app.studio.generate(kind, in: id) {
-                        app.openedStudioItemID = itemID
-                    }
+                    app.createStudioItem(kind, in: id)
                 }
                 .disabled(app.store.selectedNotebook?.enabledSources.isEmpty ?? true)
             }
             Divider()
             Button("Review Due Flashcards") {
-                app.isShowingFlashcardReview = true
+                app.stage = .flashcardReview
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
             .disabled((app.store.selectedNotebook?.dueFlashcards().isEmpty) ?? true)

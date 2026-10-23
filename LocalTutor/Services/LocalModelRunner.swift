@@ -24,6 +24,7 @@ enum LocalModelRunnerEvent: Sendable {
 enum LocalModelRunnerStage {
     static let preparingPrompt = "Preparing prompt"
     static let readingSources = "Reading sources"
+    static let readingQuestion = "Reading your question"
     static let generating = "Generating"
     static let waitingForModel = "Waiting for the model"
 
@@ -48,6 +49,7 @@ enum LocalModelRunnerStage {
             || message.hasPrefix("Using loaded")
             || message == preparingPrompt
             || message == readingSources
+            || message == readingQuestion
             || message == generating
     }
 }
@@ -109,8 +111,18 @@ actor LocalModelRunner: InferenceService {
     private struct SpeculativeConversation {
         var conversationID: UUID
         var profileID: String
+        var instructions: String
+        var recordedTurns: Int
         var cache: UncheckedSendableBox<[KVCache]>
         var tokens: [Int]
+
+        func continues(_ request: ChatInferenceRequest) -> Bool {
+            conversationID == request.conversationID
+                && profileID == request.profile.id
+                && instructions == request.instructions
+                && recordedTurns == request.history.count
+                && cache.value.first?.offset == tokens.count
+        }
     }
 
     private let modelDownloadService: ManagedModelDownloadService
@@ -121,6 +133,7 @@ actor LocalModelRunner: InferenceService {
     private var drafterUnavailableProfileIDs: Set<String> = []
     private(set) var lastDrafterError: String?
     private var didRegisterDrafterTypes = false
+    private var didRegisterModelTypes = false
     private var speculativeDecodingEnabled = UserDefaults.standard.object(forKey: AppStorageKeys.useSpeculativeDecoding) as? Bool ?? true
     private var conversation: ConversationState?
     private var speculativeConversation: SpeculativeConversation?
@@ -244,7 +257,7 @@ actor LocalModelRunner: InferenceService {
                 let images = request.runtimePolicy.supportsVision && isNewSession
                     ? request.images.map { UserInput.Image.ciImage($0.image) }
                     : []
-                await events(.stage(LocalModelRunnerStage.readingSources))
+                await events(.stage(isNewSession ? LocalModelRunnerStage.readingSources : LocalModelRunnerStage.readingQuestion))
                 let stream = session.streamDetails(to: [.user(request.message, images: images)])
                 do {
                     for try await generation in stream {
@@ -292,52 +305,47 @@ actor LocalModelRunner: InferenceService {
         events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
     ) async throws {
         let limit = request.runtimePolicy.contextTokens - request.runtimePolicy.outputReserve(for: .ask)
-        let incomingTokens = PromptTokenEstimator.estimate(request.message)
-            + request.images.count * ModelRuntimePolicy.estimatedImageTokens
-        let history = Self.trimmedHistory(
-            request.history,
-            instructions: request.instructions,
-            incomingTokens: incomingTokens,
-            limit: limit
-        )
-        let previous = speculativeConversation.flatMap {
-            $0.conversationID == request.conversationID && $0.profileID == request.profile.id ? $0 : nil
-        }
+        let previous = speculativeConversation.flatMap { $0.continues(request) ? $0 : nil }
         speculativeConversation = nil
 
-        let sendsImages = previous == nil && request.runtimePolicy.supportsVision && !request.images.isEmpty
-        var chat: [Chat.Message] = [.system(request.instructions)]
-        for message in history {
-            chat.append(.user(message.question))
-            chat.append(.assistant(message.answer))
-        }
-        chat.append(.user(request.message, images: sendsImages ? request.images.map { .ciImage($0.image) } : []))
-
         await events(.stage(LocalModelRunnerStage.preparingPrompt))
-        let prepared = try await container.prepare(
-            input: UserInput(
-                chat: chat,
-                processing: UserInput.Processing(resize: request.runtimePolicy.generationDefaults.imageResize),
-                additionalContext: Self.chatTemplateContext(for: request.profile)
-            )
-        )
-        let promptTokens = prepared.text.tokens.reshaped(-1).asArray(Int.self)
-
+        let promptTokens: [Int]
+        let input: UncheckedSendableBox<LMInput>
         var reusedCache: UncheckedSendableBox<[KVCache]>?
         var reusedCount = 0
         if let previous,
-           prepared.image == nil,
-           promptTokens.count > previous.tokens.count,
-           promptTokens.starts(with: previous.tokens),
-           previous.cache.value.first?.offset == previous.tokens.count {
+           let turn = try await Self.followUpTurnTokens(message: request.message, container: container, profile: request.profile),
+           previous.tokens.count + turn.count <= limit {
+            promptTokens = previous.tokens + turn
+            input = UncheckedSendableBox(LMInput(text: LMInput.Text(tokens: MLXArray(turn).expandedDimensions(axis: 0))))
             reusedCache = previous.cache
             reusedCount = previous.tokens.count
+        } else {
+            let incomingTokens = PromptTokenEstimator.estimate(request.message)
+                + request.images.count * ModelRuntimePolicy.estimatedImageTokens
+            let history = Self.trimmedHistory(
+                request.history,
+                instructions: request.instructions,
+                incomingTokens: incomingTokens,
+                limit: limit
+            )
+            let images = request.runtimePolicy.supportsVision ? request.images.map { UserInput.Image.ciImage($0.image) } : []
+            var chat: [Chat.Message] = [.system(request.instructions)]
+            for message in history {
+                chat.append(.user(message.question))
+                chat.append(.assistant(message.answer))
+            }
+            chat.append(.user(request.message, images: images))
+            let prepared = try await container.prepare(
+                input: UserInput(
+                    chat: chat,
+                    processing: UserInput.Processing(resize: request.runtimePolicy.generationDefaults.imageResize),
+                    additionalContext: Self.chatTemplateContext(for: request.profile)
+                )
+            )
+            promptTokens = prepared.text.tokens.reshaped(-1).asArray(Int.self)
+            input = UncheckedSendableBox(prepared)
         }
-        let input = reusedCache == nil
-            ? UncheckedSendableBox(prepared)
-            : UncheckedSendableBox(LMInput(text: LMInput.Text(
-                tokens: MLXArray(Array(promptTokens[reusedCount...])).expandedDimensions(axis: 0)
-            )))
         await collector.recordReusedPromptTokens(reusedCount)
 
         var parameters = request.runtimePolicy.generationDefaults.generateParameters(
@@ -349,7 +357,7 @@ actor LocalModelRunner: InferenceService {
         let generationParameters = parameters
         let existingCache = reusedCache
 
-        await events(.stage(LocalModelRunnerStage.readingSources))
+        await events(.stage(reusedCount > 0 ? LocalModelRunnerStage.readingQuestion : LocalModelRunnerStage.readingSources))
         let (stream, cache) = try await container.perform { context in
             let cache = try existingCache?.value ?? context.model.newCache(parameters: generationParameters)
             let stream = try MLXLMCommon.generateTokens(
@@ -383,9 +391,43 @@ actor LocalModelRunner: InferenceService {
         speculativeConversation = SpeculativeConversation(
             conversationID: request.conversationID,
             profileID: request.profile.id,
+            instructions: request.instructions,
+            recordedTurns: request.history.count + 1,
             cache: cache,
             tokens: promptTokens + generated.prefix(committed)
         )
+    }
+
+    private static func followUpTurnTokens(
+        message: String,
+        container: ModelContainer,
+        profile: ModelProfile
+    ) async throws -> [Int]? {
+        let context = chatTemplateContext(for: profile)
+        func render(answer: String) async throws -> [Int] {
+            let input = UserInput(chat: [.user("hi"), .assistant(answer), .user(message)], additionalContext: context)
+            return try await container.prepare(input: input).text.tokens.reshaped(-1).asArray(Int.self)
+        }
+        let turn = commonSuffix(try await render(answer: "yes"), try await render(answer: "no"))
+        return turn.isEmpty ? nil : turn
+    }
+
+    private static let wiredPolicy = MLXLMCommon.WiredSumPolicy()
+
+    nonisolated static func wiredBytes(profile: ModelProfile, runtimePolicy: ModelRuntimePolicy, speculative: Bool) -> Int {
+        let architecture = ModelArchitectureStore.architecture(for: profile)
+        let weights = Int(profile.downloadBytes + (speculative ? profile.drafterBytes : 0))
+        let kvBits = speculative ? 16 : runtimePolicy.generationDefaults.kvBits ?? 16
+        let kv = runtimePolicy.contextTokens * architecture.kvBytesPerToken * kvBits / 16
+        return weights + kv + architecture.fixedCacheBytes
+    }
+
+    nonisolated static func commonSuffix(_ lhs: [Int], _ rhs: [Int]) -> [Int] {
+        var count = 0
+        while count < min(lhs.count, rhs.count), lhs[lhs.count - 1 - count] == rhs[rhs.count - 1 - count] {
+            count += 1
+        }
+        return Array(lhs.suffix(count))
     }
 
     private func conversationSession(for request: ChatInferenceRequest, container: ModelContainer) -> (ChatSession, Bool) {
@@ -632,7 +674,18 @@ actor LocalModelRunner: InferenceService {
             loadSeconds = max(0, Date().timeIntervalSince(loadStart) - downloadSeconds)
 
             try Task.checkCancellation()
-            try await body(loadResult.container, collector)
+            let ticket = WiredMemoryTicket(
+                size: Self.wiredBytes(profile: profile, runtimePolicy: runtimePolicy, speculative: activeDrafter != nil),
+                policy: Self.wiredPolicy
+            )
+            _ = await ticket.start()
+            do {
+                try await body(loadResult.container, collector)
+                _ = await ticket.end()
+            } catch {
+                _ = await ticket.end()
+                throw error
+            }
             await collector.finish(events: events)
         } catch is CancellationError {
             await collector.finish(events: events)
@@ -706,20 +759,21 @@ actor LocalModelRunner: InferenceService {
         await events(.stage(LocalModelRunnerStage.checkingModelCache()))
         let tokenizerLoader = TransformersTokenizerLoader()
 
-        let progressHandler: @Sendable (DownloadProgressUpdate) -> Void = { update in
-            Task {
-                await events(.downloadProgress(update))
-            }
+        let bundle = await downloadBundle(for: profile)
+        let downloadResult = try await modelDownloadService.ensureDownloaded(profile: profile) { update in
+            Task { await events(.downloadProgress(bundle.update(update, for: .model))) }
         }
-        let downloadResult = try await modelDownloadService.ensureDownloaded(
-            profile: profile,
-            progressHandler: progressHandler
-        )
+        try await downloadDrafterIfNeeded(for: profile, bundle: bundle, events: events)
+        ChatTemplateCompatibility.patch(directory: downloadResult.directory)
 
         await events(.stage(LocalModelRunnerStage.loading(profile)))
         let container: ModelContainer
         switch profile.configuration {
         case .llm(let configuration):
+            if !didRegisterModelTypes {
+                await FlintRegistration.register()
+                didRegisterModelTypes = true
+            }
             var localConfiguration = configuration
             localConfiguration.id = .directory(downloadResult.directory)
             container = try await LLMModelFactory.shared.loadContainer(
@@ -750,6 +804,45 @@ actor LocalModelRunner: InferenceService {
         return LoadedContainer(container: container, downloadSeconds: downloadResult.downloadSeconds)
     }
 
+    private func pendingDrafter(for profile: ModelProfile) async -> ModelProfile? {
+        guard speculativeDecodingEnabled,
+              !drafterUnavailableProfileIDs.contains(profile.id),
+              let drafterProfile = profile.drafterProfile,
+              !(await modelDownloadService.isDownloaded(profile: drafterProfile)) else { return nil }
+        return drafterProfile
+    }
+
+    private func downloadBundle(for profile: ModelProfile) async -> ModelBundleProgress {
+        guard let drafterProfile = await pendingDrafter(for: profile) else {
+            return ModelBundleProgress(modelBytes: profile.downloadBytes, drafterBytes: 0)
+        }
+        let modelMissing = !(await modelDownloadService.isDownloaded(profile: profile))
+        let resumingBundle = await modelDownloadService.pendingDownloads()
+            .contains { $0.profileID == drafterProfile.id && $0.writtenBytes > 0 }
+        return ModelBundleProgress(
+            modelBytes: modelMissing || resumingBundle ? profile.downloadBytes : 0,
+            drafterBytes: profile.drafterBytes
+        )
+    }
+
+    private func downloadDrafterIfNeeded(
+        for profile: ModelProfile,
+        bundle: ModelBundleProgress,
+        events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws {
+        guard let drafterProfile = await pendingDrafter(for: profile) else { return }
+        do {
+            _ = try await modelDownloadService.ensureDownloaded(profile: drafterProfile) { update in
+                Task { await events(.downloadProgress(bundle.update(update, for: .drafter))) }
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            drafterUnavailableProfileIDs.insert(profile.id)
+            lastDrafterError = String(describing: error)
+        }
+    }
+
     private func loadDrafterIfNeeded(
         for profile: ModelProfile,
         events: @Sendable @escaping (LocalModelRunnerEvent) async -> Void
@@ -764,8 +857,9 @@ actor LocalModelRunner: InferenceService {
                 await Qwen35VLMMTPRegistration.register()
                 didRegisterDrafterTypes = true
             }
+            let bundle = await downloadBundle(for: profile)
             let download = try await modelDownloadService.ensureDownloaded(profile: drafterProfile) { update in
-                Task { await events(.downloadProgress(update)) }
+                Task { await events(.downloadProgress(bundle.update(update, for: .drafter))) }
             }
             let drafter = try await MTPDrafterModelFactory.shared.loadContainer(
                 from: download.directory,

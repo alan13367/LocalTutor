@@ -15,6 +15,31 @@ struct CitationPresentation: Identifiable, Equatable {
     var id: String { citation.id }
 }
 
+enum WorkspaceStage: Hashable {
+    case chat
+    case studioItem(UUID)
+    case note(UUID)
+    case flashcardReview
+
+    var showsComposer: Bool {
+        if case .note = self { return false }
+        return true
+    }
+
+    func resolved(in notebook: Notebook) -> WorkspaceStage {
+        switch self {
+        case .chat:
+            return .chat
+        case .studioItem(let id):
+            return notebook.studioItems.contains { $0.id == id } ? self : .chat
+        case .note(let id):
+            return notebook.notes.contains { $0.id == id } ? self : .chat
+        case .flashcardReview:
+            return notebook.allFlashcards.isEmpty ? .chat : self
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -27,8 +52,7 @@ final class AppModel {
     var globalError: String?
     var memoryWarning: String?
     var presentedCitation: CitationPresentation?
-    var openedStudioItemID: UUID?
-    var isShowingFlashcardReview = false
+    var stage: WorkspaceStage = .chat
     var hasCompletedOnboarding: Bool {
         didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: AppStorageKeys.hasCompletedOnboarding) }
     }
@@ -94,7 +118,7 @@ final class AppModel {
            let notebookID = store.selectedNotebookID {
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(3))
-                self?.openedStudioItemID = self?.studio.generate(kind, in: notebookID)
+                self?.createStudioItem(kind, in: notebookID)
             }
         }
     }
@@ -115,14 +139,38 @@ final class AppModel {
     }
 
     func openNotebook(_ id: UUID) {
+        stage = .chat
         store.selectedNotebookID = id
     }
 
     func showHome() {
         presentedCitation = nil
-        openedStudioItemID = nil
-        isShowingFlashcardReview = false
+        stage = .chat
         store.selectedNotebookID = nil
+    }
+
+    // MARK: - Stage
+
+    func stage(in notebook: Notebook) -> WorkspaceStage {
+        stage.resolved(in: notebook)
+    }
+
+    func showChat() {
+        stage = .chat
+    }
+
+    func openStudioItem(_ id: UUID?) {
+        guard let id else { return }
+        stage = .studioItem(id)
+    }
+
+    func createStudioItem(_ kind: StudyResourceKind, focus: String = "", in notebookID: UUID) {
+        openStudioItem(studio.generate(kind, focus: focus, in: notebookID))
+    }
+
+    func askInChat(_ question: String, in notebookID: UUID) {
+        stage = .chat
+        chat.ask(question, in: notebookID)
     }
 
     func isGenerating(in notebook: Notebook) -> Bool {
@@ -162,9 +210,7 @@ final class AppModel {
     func handleRefinement(_ suggestion: RefinementSuggestion, lastQuestion: String?) {
         guard let notebookID = store.selectedNotebookID else { return }
         if let kind = suggestion.newKind, kind != .ask {
-            if let id = studio.generate(kind, focus: lastQuestion ?? "", in: notebookID) {
-                openedStudioItemID = id
-            }
+            createStudioItem(kind, focus: lastQuestion ?? "", in: notebookID)
         } else {
             chat.refine(suggestion, in: notebookID)
         }

@@ -6,7 +6,6 @@
 import SwiftUI
 
 struct FlashcardPlayerView: View {
-    let title: String
     let cards: [Flashcard]
     let reviewStates: [String: FlashcardReviewState]
     var onGrade: (String, ReviewGrade) -> Void
@@ -61,13 +60,10 @@ struct FlashcardPlayerView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.headline)
-                    Text(queue.isEmpty ? "Session complete" : "\(queue.count) left · \(reviewed) reviewed")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(queue.isEmpty ? "Session complete" : "\(queue.count) left · \(reviewed) reviewed")
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
                 Spacer()
                 Text("Space to flip · 1–4 to grade")
                     .font(.caption2)

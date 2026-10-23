@@ -9,6 +9,7 @@ import SwiftUI
 
 struct QuizPlayerView: View {
     let quiz: QuizArtifact
+    var tint: Color = .accentColor
 
     @State private var currentIndex = 0
     @State private var selectedAnswers: [String: String] = [:]
@@ -16,6 +17,7 @@ struct QuizPlayerView: View {
     @State private var shortAnswerDrafts: [String: String] = [:]
     @State private var selfGrades: [String: Bool] = [:]
     @State private var showResults = false
+    @FocusState private var isFocused: Bool
 
     private var question: QuizQuestion? {
         guard !quiz.questions.isEmpty, currentIndex < quiz.questions.count else { return nil }
@@ -34,6 +36,13 @@ struct QuizPlayerView: View {
                 controls(question: question)
             }
         }
+        .focusable()
+        .focused($isFocused)
+        .focusEffectDisabled()
+        .onKeyPress(.return) { handleReturn() }
+        .onKeyPress(characters: .letters) { press in selectChoice(press.characters) }
+        .onAppear { isFocused = true }
+        .onChange(of: currentIndex) { isFocused = true }
     }
 
     // MARK: Header
@@ -41,26 +50,22 @@ struct QuizPlayerView: View {
     private var header: some View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(quiz.title ?? "Quiz")
-                        .font(.headline)
-                    if !showResults {
-                        Text("Question \(min(currentIndex + 1, quiz.questions.count)) of \(quiz.questions.count)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Final score")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                Text(showResults ? "Final score" : "Question \(min(currentIndex + 1, quiz.questions.count)) of \(quiz.questions.count)")
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
                 Spacer()
+                if !showResults {
+                    Text(question?.type == .shortAnswer ? "Return to check" : "A–D to answer · Return to check")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
                 scoreBadge
             }
 
             ProgressView(value: progressFraction)
                 .progressViewStyle(.linear)
-                .tint(Color.accentColor)
+                .tint(tint)
         }
     }
 
@@ -78,8 +83,8 @@ struct QuizPlayerView: View {
             .font(.callout.weight(.semibold).monospacedDigit())
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(Capsule().fill(Color.accentColor.opacity(answered == 0 ? 0.08 : 0.16)))
-            .foregroundStyle(Color.accentColor)
+            .background(Capsule().fill(tint.opacity(answered == 0 ? 0.08 : 0.16)))
+            .foregroundStyle(tint)
     }
 
     // MARK: Question
@@ -149,7 +154,6 @@ struct QuizPlayerView: View {
         }
         .buttonStyle(.plain)
         .disabled(isRevealed)
-        .keyboardShortcut(KeyEquivalent(Character(letter(for: index).lowercased())), modifiers: [])
         .accessibilityHint("Press \(letter(for: index))")
     }
 
@@ -193,6 +197,11 @@ struct QuizPlayerView: View {
                         .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
                 )
                 .disabled(revealed)
+                .onSubmit {
+                    if canSubmit(question: question) {
+                        submit(question: question)
+                    }
+                }
 
             if revealed {
                 HStack(spacing: 8) {
@@ -261,7 +270,6 @@ struct QuizPlayerView: View {
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
             } else {
                 Button {
                     submit(question: question)
@@ -270,7 +278,6 @@ struct QuizPlayerView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canSubmit(question: question))
-                .keyboardShortcut(.defaultAction)
             }
         }
     }
@@ -292,6 +299,26 @@ struct QuizPlayerView: View {
         revealed.insert(question.id)
     }
 
+    private func handleReturn() -> KeyPress.Result {
+        guard !showResults, let question else { return .ignored }
+        if revealed.contains(question.id) {
+            advance()
+            return .handled
+        }
+        guard canSubmit(question: question) else { return .ignored }
+        submit(question: question)
+        return .handled
+    }
+
+    private func selectChoice(_ characters: String) -> KeyPress.Result {
+        guard !showResults, let question, question.type != .shortAnswer, !revealed.contains(question.id),
+              let index = question.choices.indices.first(where: { letter(for: $0) == characters.uppercased() }) else {
+            return .ignored
+        }
+        selectedAnswers[question.id] = question.choices[index]
+        return .handled
+    }
+
     private func advance() {
         if isLast {
             showResults = true
@@ -311,11 +338,11 @@ struct QuizPlayerView: View {
             HStack(spacing: 14) {
                 ZStack {
                     Circle()
-                        .fill(Color.accentColor.opacity(0.16))
+                        .fill(tint.opacity(0.16))
                         .frame(width: 56, height: 56)
                     Text("\(percent)%")
                         .font(.title3.weight(.bold).monospacedDigit())
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(tint)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(resultHeadline(percent: percent))

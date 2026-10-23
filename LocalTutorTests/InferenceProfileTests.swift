@@ -13,7 +13,7 @@ struct InferenceProfileTests {
     func catalogLoadsFromBundledJSONInTierOrder() {
         let ids = ModelProfile.studyCatalog.map(\.id)
 
-        #expect(ids == ["gemma4E2B", "qwen35_4B", "gemma4E4B", "qwen35_9B", "qwythos9B", "lfm25A1B8B", "gemma4_12B", "gemma4_26B_A4B"])
+        #expect(ids == ["gemma4E2B", "qwen35_4B", "gemma4E4B", "qwen35_9B", "qwythos9B", "lfm25A1B8B", "gemma4_12B", "gemma4_26B_A4B", "flint40B_A2B"])
         #expect(ModelProfile.studyCatalog.map(\.tier) == ModelProfile.studyCatalog.map(\.tier).sorted())
         #expect(ModelProfile.studyCatalog.allSatisfy { $0.downloadBytes > 0 && $0.kvBytesPerToken > 0 })
     }
@@ -121,6 +121,64 @@ struct InferenceProfileTests {
         #expect(context(4_000) == 99_328)
         #expect(context(1_000) < context(4_000))
         #expect(context(1_000, .extended) == 131_072)
+    }
+
+    @Test
+    func flintUsesItsRecommendedSamplingAndAnUnquantizedCache() {
+        let flint = ModelCatalog.require("flint40B_A2B")
+        #expect(flint.tier == .thirtyTwoGB)
+        #expect(!flint.supportsVision)
+        #expect(!flint.supportsSpeculativeDecoding)
+        #expect(!flint.isRecommended)
+        #expect(flint.defaults.kvBits == nil)
+        #expect(flint.defaults.maxTokens == 8_192)
+
+        let parameters = flint.defaults.generateParameters()
+        #expect(parameters.temperature == 1.0)
+        #expect(parameters.topP == 0.95)
+        #expect(parameters.topK == 20)
+        #expect(parameters.kvBits == nil)
+        #expect(ModelProfile.gemma4E2B.defaults.generateParameters().topK == 0)
+    }
+
+    @Test
+    func multiTokenPredictionIsOffByDefaultOnlyForTheMixtureOfExperts() {
+        let moe = ModelCatalog.require("gemma4_26B_A4B")
+        #expect(moe.supportsSpeculativeDecoding)
+        #expect(!moe.speculativeDecodingByDefault)
+        #expect(moe.totalDownloadBytes == moe.downloadBytes)
+        let dense = ModelProfile.studyCatalog.filter { $0.supportsSpeculativeDecoding && $0.id != moe.id }
+        #expect(!dense.isEmpty)
+        #expect(dense.filter { !$0.speculativeDecodingByDefault }.isEmpty)
+    }
+
+    @Test
+    func speculativeDecodingChoiceIsPerModelAndRespectsTheOldGlobalOptOut() {
+        let moe = ModelCatalog.require("gemma4_26B_A4B")
+        let dense = ModelProfile.gemma4E2B
+        func resolve(_ profile: ModelProfile, _ choices: [String: Bool], _ legacy: Bool?) -> Bool {
+            SpeculativeDecodingPreference.isEnabled(for: profile, choices: choices, legacyChoice: legacy)
+        }
+
+        #expect(resolve(dense, [:], nil))
+        #expect(!resolve(moe, [:], nil))
+        #expect(resolve(moe, [moe.id: true], nil))
+        #expect(!resolve(dense, [dense.id: false], nil))
+        #expect(!resolve(dense, [:], false))
+        #expect(resolve(dense, [dense.id: true], false))
+        #expect(!resolve(moe, [:], true))
+        #expect(!resolve(ModelProfile.qwen35_4B, [ModelProfile.qwen35_4B.id: true], nil))
+    }
+
+    @Test
+    func turningOffTheDrafterLeavesMoreRoomForContext() {
+        let moe = ModelCatalog.require("gemma4_26B_A4B")
+        let architecture = ModelArchitecture.catalogEstimate(for: moe)
+        let workingSet = ContextBudget.workingSetBytes(forSystemMemory: 36.gibibytes)
+        let withDrafter = ContextBudget.memoryFit(for: moe, architecture: architecture, workingSetBytes: workingSet, speculative: true)
+        let without = ContextBudget.memoryFit(for: moe, architecture: architecture, workingSetBytes: workingSet, speculative: false)
+        #expect(without > withDrafter)
+        #expect(ContextBudget.memoryFit(for: moe, architecture: architecture, workingSetBytes: workingSet) == without)
     }
 
     @Test

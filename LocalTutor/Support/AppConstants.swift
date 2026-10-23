@@ -11,4 +11,5 @@ enum AppStorageKeys {
     static let audioVoiceA = "audioVoiceA"
     static let audioVoiceB = "audioVoiceB"
     static let useSpeculativeDecoding = "useSpeculativeDecoding"
+    static let speculativeDecodingByModel = "speculativeDecodingByModel"
 }

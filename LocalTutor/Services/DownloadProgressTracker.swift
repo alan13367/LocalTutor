@@ -22,6 +22,55 @@ struct DownloadProgressUpdate: Equatable, Sendable {
     }
 }
 
+struct ModelBundleProgress: Equatable, Sendable {
+    enum Part: Sendable {
+        case model
+        case drafter
+    }
+
+    static let drafterName = "MTP drafter"
+
+    var modelBytes: UInt64
+    var drafterBytes: UInt64
+
+    private var totalBytes: UInt64 { modelBytes + drafterBytes }
+
+    func fraction(_ partFraction: Double, of part: Part) -> Double {
+        guard totalBytes > 0 else { return partFraction }
+        let modelShare = Double(modelBytes) / Double(totalBytes)
+        switch part {
+        case .model: return partFraction * modelShare
+        case .drafter: return modelShare + partFraction * (1 - modelShare)
+        }
+    }
+
+    func update(_ update: DownloadProgressUpdate, for part: Part) -> DownloadProgressUpdate {
+        if part == .model, drafterBytes == 0 {
+            return update
+        }
+        let name = part == .drafter ? Self.drafterName : "model"
+        guard let partFraction = update.fraction else {
+            return DownloadProgressUpdate(fraction: nil, message: "Downloading \(name)")
+        }
+        let fraction = fraction(partFraction, of: part)
+        if partFraction >= 1 {
+            let message = part == .model ? "Downloading \(Self.drafterName)" : "Download complete"
+            return DownloadProgressUpdate(fraction: fraction, message: message)
+        }
+        if partFraction >= 0.999 {
+            return DownloadProgressUpdate(fraction: fraction, message: "Finalizing \(name) files")
+        }
+        var message = "Downloading \(name) · \(DownloadProgressUpdate.percentText(for: fraction))"
+        if totalBytes > 1_000_000 {
+            let completed = Int64(fraction * Double(totalBytes))
+            let completedText = ByteCountFormatter.localTutorMemoryString(fromByteCount: completed)
+            let totalText = ByteCountFormatter.localTutorMemoryString(fromByteCount: Int64(totalBytes))
+            message += " · \(completedText) of \(totalText)"
+        }
+        return DownloadProgressUpdate(fraction: fraction, message: message)
+    }
+}
+
 final class DownloadProgressTracker: @unchecked Sendable {
     private static let temporaryScanInterval: TimeInterval = 0.25
 

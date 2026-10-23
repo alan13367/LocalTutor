@@ -82,6 +82,10 @@ struct Notebook: Identifiable, Equatable, Codable {
             return state.due <= now
         }
     }
+
+    func runningStudioItem(of kind: StudyResourceKind) -> StudioItem? {
+        studioItems.first { $0.isRunning && $0.kind == kind }
+    }
 }
 
 struct NotebookChat: Identifiable, Equatable, Codable {

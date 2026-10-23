@@ -55,6 +55,7 @@ struct ModelRuntimeDefaults: Equatable, Sendable {
     var maxTokens: Int
     var temperature: Float
     var topP: Float
+    var topK = 0
     var prefillStepSize: Int
     var maxContextTokens: Int
     var kvBits: Int?
@@ -119,6 +120,7 @@ struct ModelRuntimeDefaults: Equatable, Sendable {
             kvBits: kvBits,
             temperature: temperatureOverride ?? temperature,
             topP: topP,
+            topK: topK,
             prefill: PrefillParameters(stepSize: prefillStepSize)
         )
     }
@@ -151,6 +153,7 @@ struct ModelProfile: Identifiable, Sendable {
     var kvBytesPerToken: Int = 32_768
     var drafterRepository: String?
     var drafterBytes: UInt64 = 0
+    var speculativeDecodingByDefault = true
 
     var supportsVision: Bool { kind == .vision }
 
@@ -172,7 +175,7 @@ struct ModelProfile: Identifiable, Sendable {
         )
     }
 
-    var totalDownloadBytes: UInt64 { downloadBytes + drafterBytes }
+    var totalDownloadBytes: UInt64 { downloadBytes + (speculativeDecodingByDefault ? drafterBytes : 0) }
 
     var minimumSystemMemoryDescription: String {
         ByteCountFormatter.localTutorMemoryString(fromByteCount: Int64(minimumSystemMemoryBytes))
@@ -199,6 +202,10 @@ extension ModelProfile {
 
     static func profile(withID id: String) -> ModelProfile? {
         ModelCatalog.profile(withID: id)
+    }
+
+    static func profile(owningDrafterID id: String) -> ModelProfile? {
+        ModelCatalog.studyCatalog.first { $0.drafterProfile?.id == id }
     }
 
     static var recommendedDefault: ModelProfile {

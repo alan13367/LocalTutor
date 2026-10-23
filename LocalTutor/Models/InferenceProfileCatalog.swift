@@ -39,8 +39,12 @@ struct ModelCatalogEntry: Decodable, Equatable {
     var toolCallFormat: String?
     var maxTokens: Int?
     var temperature: Float?
+    var topP: Float?
+    var topK: Int?
+    var quantizeKVCache: Bool?
     var drafterRepository: String?
     var drafterBytes: UInt64?
+    var speculativeDecodingByDefault: Bool?
 }
 
 enum ModelCatalog {
@@ -125,6 +129,15 @@ enum ModelCatalog {
         if let temperature = entry.temperature {
             defaults.temperature = temperature
         }
+        if let topP = entry.topP {
+            defaults.topP = topP
+        }
+        if let topK = entry.topK {
+            defaults.topK = topK
+        }
+        if entry.quantizeKVCache == false {
+            defaults.kvBits = nil
+        }
 
         return ModelProfile(
             id: entry.id,
@@ -144,7 +157,8 @@ enum ModelCatalog {
             downloadBytes: entry.downloadBytes,
             kvBytesPerToken: entry.kvBytesPerToken,
             drafterRepository: entry.drafterRepository,
-            drafterBytes: entry.drafterBytes ?? 0
+            drafterBytes: entry.drafterBytes ?? 0,
+            speculativeDecodingByDefault: entry.speculativeDecodingByDefault ?? true
         )
     }
 

@@ -301,6 +301,36 @@ struct NotebookTests {
     }
 
     @Test
+    func runningStudioItemIsOnePerTool() {
+        let running = StudioItem(kind: .audioOverview, focus: "Chapter 3")
+        let finished = StudioItem(kind: .quiz, status: .done)
+        let notebook = Notebook(studioItems: [running, finished])
+
+        #expect(notebook.runningStudioItem(of: .audioOverview)?.id == running.id)
+        #expect(notebook.runningStudioItem(of: .mindMap) == nil)
+        #expect(notebook.runningStudioItem(of: .quiz) == nil)
+    }
+
+    @Test
+    func workspaceStageFallsBackToChatWhenItsContentIsGone() {
+        var item = StudioItem(kind: .flashcards, status: .done)
+        item.payload = .flashcards(FlashcardDeck(title: "Deck", cards: [Flashcard(id: "c1", front: "A", back: "1")]))
+        let note = StudyNote(title: "Note", markdown: "Body")
+        let notebook = Notebook(studioItems: [item])
+        var withNote = notebook
+        withNote.notes = [note]
+
+        #expect(WorkspaceStage.studioItem(item.id).resolved(in: notebook) == .studioItem(item.id))
+        #expect(WorkspaceStage.studioItem(UUID()).resolved(in: notebook) == .chat)
+        #expect(WorkspaceStage.note(note.id).resolved(in: notebook) == .chat)
+        #expect(WorkspaceStage.note(note.id).resolved(in: withNote) == .note(note.id))
+        #expect(WorkspaceStage.flashcardReview.resolved(in: notebook) == .flashcardReview)
+        #expect(WorkspaceStage.flashcardReview.resolved(in: Notebook()) == .chat)
+        #expect(!WorkspaceStage.note(note.id).showsComposer)
+        #expect(WorkspaceStage.studioItem(item.id).showsComposer)
+    }
+
+    @Test
     func thinkingTemplatesRenderHistoryLikeTheGenerationPrompt() {
         let template = "{%- if enable_thinking is defined %}{%- endif %}{%- if loop.index0 > ns.last_query_index %}think{%- else %}plain{%- endif %}"
 

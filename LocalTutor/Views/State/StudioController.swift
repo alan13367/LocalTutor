@@ -34,6 +34,9 @@ final class StudioController {
     @discardableResult
     func generate(_ kind: StudyResourceKind, focus: String = "", in notebookID: UUID) -> UUID? {
         guard kind != .ask else { return nil }
+        if let running = store.notebook(notebookID)?.runningStudioItem(of: kind) {
+            return running.id
+        }
         guard let profile = models.selectedProfile, let policy = models.runtimePolicy else {
             onError("Choose a model before creating study materials.")
             return nil

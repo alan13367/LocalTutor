@@ -51,7 +51,6 @@ struct MindMapView: View {
             }
             .frame(width: size.width, height: size.height)
         }
-        .background(.background.secondary)
         .overlay(alignment: .bottomTrailing) {
             Text("Click a branch to fold it · Right-click to ask about a topic")
                 .font(.caption2)

@@ -6,7 +6,9 @@
 
 import Foundation
 import MLX
+import MLXLLM
 import MLXLMCommon
+import MLXNN
 @testable import MLXVLM
 import Testing
 import UniformTypeIdentifiers
@@ -222,6 +224,128 @@ struct LocalModelRunnerTests {
         #expect(DownloadProgressUpdate.percentText(for: 0.0004) == "<0.1%")
         #expect(update?.message.hasPrefix("Downloading 0.4%") == true)
         #expect(update?.message.contains(" of ") == true)
+    }
+
+    @MainActor
+    @Test
+    func preloadingAppliesEachModelsMultiTokenPredictionChoiceFirst() async throws {
+        let moe = ModelCatalog.require("gemma4_26B_A4B")
+        let dense = ModelProfile.gemma4E2B
+        guard MemoryPreflight.evaluate(profile: moe).canRun else { return }
+        let service = RecordingInferenceService()
+        let models = ModelManager(inferenceService: service, cacheInfoProvider: { _ in [:] }, downloadService: nil)
+
+        try await models.ensureLoaded(moe)
+        try await models.ensureLoaded(dense)
+
+        var expected = ["mtp \(models.usesSpeculativeDecoding(moe))", "preload \(moe.id)"]
+        if models.usesSpeculativeDecoding(dense) != models.usesSpeculativeDecoding(moe) {
+            expected.append("mtp \(models.usesSpeculativeDecoding(dense))")
+        }
+        expected.append("preload \(dense.id)")
+        #expect(await service.events == expected)
+    }
+
+    @Test
+    func wiredMemoryCoversWeightsAndTheKVCache() {
+        let profile = ModelCatalog.require("gemma4_26B_A4B")
+        let policy = ModelRuntimePolicyProvider.policy(for: profile, systemMemoryBytes: 36.gibibytes, preference: .extended, speculative: false)
+        let plain = LocalModelRunner.wiredBytes(profile: profile, runtimePolicy: policy, speculative: false)
+        let speculative = LocalModelRunner.wiredBytes(profile: profile, runtimePolicy: policy, speculative: true)
+
+        #expect(plain > Int(profile.downloadBytes))
+        #expect(speculative > plain + Int(profile.drafterBytes))
+    }
+
+    @Test
+    func chatTemplateNulEscapeBecomesARealNulCharacter() throws {
+        let template = #"{{- t | replace("\x00", "") | replace("<think>", "") -}}"#
+        let patched = ChatTemplateCompatibility.patchedTemplate(template)
+        #expect(patched == "{{- t | replace(\"\u{0}\", \"\") | replace(\"<think>\", \"\") -}}")
+        #expect(ChatTemplateCompatibility.patchedTemplate(patched) == patched)
+
+        let config = try JSONSerialization.data(withJSONObject: ["chat_template": template])
+        let json = ChatTemplateCompatibility.patchedTokenizerConfig(String(decoding: config, as: UTF8.self))
+        let decoded = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: String]
+        #expect(decoded?["chat_template"] == patched)
+    }
+
+    @Test
+    func flintIncrementalDecodingMatchesAFullPass() async throws {
+        let config = """
+        {"model_type": "flint", "hidden_size": 64, "num_hidden_layers": 4, "intermediate_size": 96,
+         "num_attention_heads": 4, "num_key_value_heads": 2, "head_dim": 16, "num_experts": 8,
+         "num_experts_per_tok": 2, "moe_intermediate_size": 32, "shared_expert_intermediate_size": 48,
+         "mlp_only_layers": [0], "sliding_window": 3, "rms_norm_eps": 1e-6, "vocab_size": 101,
+         "layer_types": ["full_attention", "sliding_attention", "sliding_attention", "full_attention"],
+         "rope_parameters": {"rope_theta": 10000.0, "rope_type": "default"}}
+        """
+        await FlintRegistration.register()
+        let model = try await LLMTypeRegistry.shared.createModel(configuration: Data(config.utf8), modelType: "flint")
+        let flint = try #require(model as? FlintModel)
+        MLXRandom.seed(7)
+        let sinks = (0 ..< 4).map { ("model.layers.\($0).self_attn.softmax_offset", MLXRandom.normal([4])) }
+        try flint.update(parameters: ModuleParameters.unflattened(Dictionary(uniqueKeysWithValues: sinks)), verify: .noUnusedKeys)
+
+        let tokens = MLXArray([3, 17, 42, 8, 99, 23, 5, 61] as [Int32]).reshaped(1, -1)
+        let full = flint(tokens, cache: nil)
+
+        let cache = try flint.newCache(parameters: nil)
+        #expect(cache[1] is RotatingKVCache)
+        #expect(!(cache[0] is RotatingKVCache))
+        let prefill = flint(tokens[0..., ..<6], cache: cache)
+        var step = flint(tokens[0..., 6 ..< 7], cache: cache)
+        #expect(prefill.shape == [1, 6, 101])
+        #expect(allClose(prefill, full[0..., ..<6], atol: 1e-4).item(Bool.self))
+        #expect(allClose(step[0..., -1], full[0..., 6], atol: 1e-4).item(Bool.self))
+        step = flint(tokens[0..., 7 ..< 8], cache: cache)
+        #expect(allClose(step[0..., -1], full[0..., 7], atol: 1e-4).item(Bool.self))
+    }
+
+    @Test
+    func commonSuffixKeepsOnlyTheSharedTail() {
+        #expect(LocalModelRunner.commonSuffix([1, 2, 7, 8, 9], [4, 5, 6, 8, 9]) == [8, 9])
+        #expect(LocalModelRunner.commonSuffix([1, 2], [3, 4]) == [])
+        #expect(LocalModelRunner.commonSuffix([9], [1, 2, 9]) == [9])
+    }
+
+    @Test
+    func readingYourQuestionEndsTheDownloadPhase() {
+        #expect(LocalModelRunnerStage.endsDownloadPhase(LocalModelRunnerStage.readingQuestion))
+    }
+
+    @Test
+    func modelBundleProgressReadsAsOneDownloadThatNamesTheDrafter() {
+        let bundle = ModelBundleProgress(modelBytes: 3_000_000_000, drafterBytes: 1_000_000_000)
+
+        let model = bundle.update(DownloadProgressUpdate(fraction: 0.5, message: "Downloading 50%"), for: .model)
+        #expect(model.fraction == 0.375)
+        #expect(model.message.hasPrefix("Downloading model · 37%"))
+
+        let handoff = bundle.update(DownloadProgressUpdate(fraction: 1, message: "Download complete"), for: .model)
+        #expect(handoff.fraction == 0.75)
+        #expect(handoff.message == "Downloading MTP drafter")
+
+        let drafter = bundle.update(DownloadProgressUpdate(fraction: 0.5, message: "Downloading 50%"), for: .drafter)
+        #expect(drafter.fraction == 0.875)
+        #expect(drafter.message.hasPrefix("Downloading MTP drafter · 87%"))
+        #expect(drafter.message.contains(" of "))
+
+        let done = bundle.update(DownloadProgressUpdate(fraction: 1, message: "Download complete"), for: .drafter)
+        #expect(done.fraction == 1)
+        #expect(done.message == "Download complete")
+    }
+
+    @Test
+    func modelBundleProgressLeavesPlainDownloadsAlone() {
+        let plain = ModelBundleProgress(modelBytes: 3_000_000_000, drafterBytes: 0)
+        let update = DownloadProgressUpdate(fraction: 0.4, message: "Downloading 40% · 1.2 GB of 3 GB")
+        #expect(plain.update(update, for: .model) == update)
+
+        let drafterOnly = ModelBundleProgress(modelBytes: 0, drafterBytes: 400_000_000)
+        let drafter = drafterOnly.update(DownloadProgressUpdate(fraction: 0.25, message: "Downloading 25%"), for: .drafter)
+        #expect(drafter.fraction == 0.25)
+        #expect(drafter.message.hasPrefix("Downloading MTP drafter · 25%"))
     }
 
     @Test
@@ -639,6 +763,50 @@ struct LocalModelRunnerTests {
         let data = try JSONEncoder().encode(manifest)
         try data.write(to: url, options: [.atomic])
     }
+}
+
+private actor RecordingInferenceService: InferenceService {
+    private(set) var events: [String] = []
+
+    func run(
+        request _: InferenceRequest,
+        events _: nonisolated(nonsending) @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws -> BenchmarkRecord {
+        throw CancellationError()
+    }
+
+    func chat(
+        request _: ChatInferenceRequest,
+        events _: nonisolated(nonsending) @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws -> BenchmarkRecord {
+        throw CancellationError()
+    }
+
+    func generateStructured(
+        request _: InferenceRequest,
+        jsonSchema _: String,
+        events _: nonisolated(nonsending) @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws -> BenchmarkRecord {
+        throw CancellationError()
+    }
+
+    func preload(
+        profile: ModelProfile,
+        runtimePolicy _: ModelRuntimePolicy,
+        events _: nonisolated(nonsending) @Sendable @escaping (LocalModelRunnerEvent) async -> Void
+    ) async throws {
+        events.append("preload \(profile.id)")
+    }
+
+    func unload() async {}
+
+    func releaseConversations() async {}
+
+    func setSpeculativeDecoding(_ enabled: Bool) async {
+        events.append("mtp \(enabled)")
+    }
+
+    func clearCache() async throws {}
 }
 
 private struct NoopInferenceService: InferenceService {

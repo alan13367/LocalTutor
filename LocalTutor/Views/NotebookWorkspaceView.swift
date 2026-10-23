@@ -77,12 +77,6 @@ struct NotebookWorkspaceView: View {
         .sheet(item: $app.presentedCitation) { presentation in
             CitationSourceView(presentation: presentation)
         }
-        .sheet(item: openedStudioItemBinding) { item in
-            StudioItemDetailView(notebookID: notebook.id, itemID: item.id)
-        }
-        .sheet(isPresented: $app.isShowingFlashcardReview) {
-            FlashcardReviewSheet(notebookID: notebook.id)
-        }
     }
 
     private var notebookMenu: some View {
@@ -110,15 +104,4 @@ struct NotebookWorkspaceView: View {
         }
         .help("Rename, change icon or delete this notebook")
     }
-
-    private var openedStudioItemBinding: Binding<IdentifiedUUID?> {
-        Binding(
-            get: { app.openedStudioItemID.map(IdentifiedUUID.init) },
-            set: { app.openedStudioItemID = $0?.id }
-        )
-    }
-}
-
-struct IdentifiedUUID: Identifiable, Hashable {
-    let id: UUID
 }

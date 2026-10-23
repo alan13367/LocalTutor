@@ -32,6 +32,31 @@ enum ContextPreference: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum SpeculativeDecodingPreference {
+    static func isEnabled(for profile: ModelProfile, choices: [String: Bool], legacyChoice: Bool?) -> Bool {
+        guard profile.supportsSpeculativeDecoding else { return false }
+        if let choice = choices[profile.id] {
+            return choice
+        }
+        if legacyChoice == false {
+            return false
+        }
+        return profile.speculativeDecodingByDefault
+    }
+
+    static var storedChoices: [String: Bool] {
+        UserDefaults.standard.dictionary(forKey: AppStorageKeys.speculativeDecodingByModel) as? [String: Bool] ?? [:]
+    }
+
+    static var legacyChoice: Bool? {
+        UserDefaults.standard.object(forKey: AppStorageKeys.useSpeculativeDecoding) as? Bool
+    }
+
+    static func current(for profile: ModelProfile) -> Bool {
+        isEnabled(for: profile, choices: storedChoices, legacyChoice: legacyChoice)
+    }
+}
+
 struct ModelRuntimePolicy: Equatable, Sendable {
     static let estimatedImageTokens = 640
     static let instructionReserve = 1_200
@@ -99,11 +124,13 @@ enum ContextBudget {
     static func memoryFit(
         for profile: ModelProfile,
         architecture: ModelArchitecture,
-        workingSetBytes: UInt64
+        workingSetBytes: UInt64,
+        speculative: Bool? = nil
     ) -> Int {
-        let weights = Double(profile.downloadBytes + (profile.supportsSpeculativeDecoding ? profile.drafterBytes : 0)) * 1.05
+        let speculative = speculative ?? (profile.supportsSpeculativeDecoding && profile.speculativeDecodingByDefault)
+        let weights = Double(profile.downloadBytes + (speculative ? profile.drafterBytes : 0)) * 1.05
         let free = (Double(workingSetBytes) - weights - runtimeOverheadBytes - Double(architecture.fixedCacheBytes)) * kvHeadroom
-        let bits = Double(profile.supportsSpeculativeDecoding ? 16 : profile.defaults.kvBits ?? 16)
+        let bits = Double(speculative ? 16 : profile.defaults.kvBits ?? 16)
         let bytesPerToken = max(1, Double(architecture.kvBytesPerToken) * bits / 16)
         guard free > 0 else { return minimumContextTokens }
         return Int(min(free / bytesPerToken, Double(Int.max / 2)))
@@ -118,7 +145,8 @@ enum ContextBudget {
         systemMemoryBytes: UInt64,
         preference: ContextPreference,
         architecture: ModelArchitecture? = nil,
-        prefillTokensPerSecond: Double? = nil
+        prefillTokensPerSecond: Double? = nil,
+        speculative: Bool? = nil
     ) -> Int {
         let architecture = architecture ?? ModelArchitectureStore.architecture(for: profile)
         var candidates = [
@@ -126,7 +154,8 @@ enum ContextBudget {
             memoryFit(
                 for: profile,
                 architecture: architecture,
-                workingSetBytes: workingSetBytes(forSystemMemory: systemMemoryBytes)
+                workingSetBytes: workingSetBytes(forSystemMemory: systemMemoryBytes),
+                speculative: speculative
             )
         ]
         if preference == .standard {
@@ -144,14 +173,16 @@ enum ModelRuntimePolicyProvider {
         systemMemoryBytes: UInt64 = ProcessInfo.processInfo.physicalMemory,
         preference: ContextPreference = .current,
         architecture: ModelArchitecture? = nil,
-        prefillTokensPerSecond: Double? = nil
+        prefillTokensPerSecond: Double? = nil,
+        speculative: Bool? = nil
     ) -> ModelRuntimePolicy {
         let contextTokens = ContextBudget.contextTokens(
             for: profile,
             systemMemoryBytes: systemMemoryBytes,
             preference: preference,
             architecture: architecture,
-            prefillTokensPerSecond: prefillTokensPerSecond
+            prefillTokensPerSecond: prefillTokensPerSecond,
+            speculative: speculative ?? SpeculativeDecodingPreference.current(for: profile)
         )
         return ModelRuntimePolicy(
             profileID: profile.id,

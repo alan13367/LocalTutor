@@ -4,15 +4,8 @@
     "" : {
 
     },
-    "%@ · %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@ · %2$@"
-          }
-        }
-      }
+    "·" : {
+
     },
     "%@ · %@ · %@" : {
       "localizations" : {
@@ -94,6 +87,16 @@
         }
       }
     },
+    "%@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@: %2$@"
+          }
+        }
+      }
+    },
     "%lld" : {
 
     },
@@ -116,6 +119,9 @@
           }
         }
       }
+    },
+    "%lld creating" : {
+
     },
     "%lld due" : {
 
@@ -188,10 +194,10 @@
     "A notebook holds the sources for one subject. Ask questions and LocalTutor answers with citations, all on your Mac." : {
 
     },
-    "About" : {
+    "A–D to answer · Return to check" : {
 
     },
-    "Actions" : {
+    "About" : {
 
     },
     "Add" : {
@@ -207,6 +213,9 @@
 
     },
     "All caught up" : {
+
+    },
+    "All flashcards caught up" : {
 
     },
     "All notebooks (⌘[)" : {
@@ -242,6 +251,12 @@
     "Back" : {
 
     },
+    "Back to Chat" : {
+
+    },
+    "Back to chat (Esc)" : {
+
+    },
     "Cancel" : {
 
     },
@@ -266,13 +281,16 @@
     "Clear Cache" : {
 
     },
+    "Clear focus" : {
+
+    },
     "Clear Index" : {
 
     },
     "Click a branch to fold it · Right-click to ask about a topic" : {
 
     },
-    "Close" : {
+    "Close and return to chat" : {
 
     },
     "Collapse" : {
@@ -296,9 +314,6 @@
     "Copy as Markdown" : {
 
     },
-    "Couldn't create this %@" : {
-
-    },
     "Create %@" : {
 
     },
@@ -308,18 +323,11 @@
     "Create your first notebook" : {
 
     },
-    "Created" : {
+    "Created items concentrate on this topic, e.g. \"Chapter 3\"" : {
 
     },
-    "Creating your %@ from %lld source%@…" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Creating your %1$@ from %2$lld source%3$@…"
-          }
-        }
-      }
+    "Creating your %@" : {
+
     },
     "Delete" : {
 
@@ -388,13 +396,13 @@
     "Expected: %@" : {
 
     },
+    "Export as Markdown…" : {
+
+    },
     "Export failed" : {
 
     },
     "Export JSON" : {
-
-    },
-    "Export…" : {
 
     },
     "Failed · click for details" : {
@@ -412,7 +420,7 @@
     "Flip to see the answer" : {
 
     },
-    "Focus (optional), e.g. \"Chapter 3\"" : {
+    "Focus on a topic (optional)" : {
 
     },
     "Focus topic for generated materials" : {
@@ -481,6 +489,19 @@
     "Jump to latest" : {
 
     },
+    "Line %lld" : {
+
+    },
+    "Line %lld of %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Line %1$lld of %2$lld"
+          }
+        }
+      }
+    },
     "LocalTutor" : {
 
     },
@@ -524,6 +545,12 @@
     "Models" : {
 
     },
+    "More" : {
+
+    },
+    "More actions" : {
+
+    },
     "Name" : {
 
     },
@@ -548,9 +575,6 @@
     "Next" : {
 
     },
-    "Next line" : {
-
-    },
     "Nice work: %lld review%@" : {
       "localizations" : {
         "en" : {
@@ -567,6 +591,9 @@
     "No models downloaded." : {
 
     },
+    "Not playing" : {
+
+    },
     "Not quite" : {
 
     },
@@ -574,9 +601,6 @@
 
     },
     "Notebooks" : {
-
-    },
-    "Notes" : {
 
     },
     "Nothing due" : {
@@ -588,6 +612,9 @@
     "Open" : {
 
     },
+    "Open %@ being created" : {
+
+    },
     "Open in Default App" : {
 
     },
@@ -595,6 +622,9 @@
 
     },
     "Or drop PDFs, slides and notes anywhere in this window." : {
+
+    },
+    "or start with a study tool" : {
 
     },
     "Output" : {
@@ -606,6 +636,9 @@
     "Pause" : {
 
     },
+    "Pause (Space)" : {
+
+    },
     "PDFs, Word, Pages, slides, spreadsheets, EPUBs, web pages and images. Drop files anywhere in the window." : {
 
     },
@@ -615,6 +648,9 @@
     "Play" : {
 
     },
+    "Play (Space)" : {
+
+    },
     "Practice Again" : {
 
     },
@@ -622,9 +658,6 @@
 
     },
     "Preview" : {
-
-    },
-    "Previous line" : {
 
     },
     "Profiles" : {
@@ -713,7 +746,13 @@
     "Resume" : {
 
     },
+    "Return to check" : {
+
+    },
     "Review" : {
+
+    },
+    "Review %lld due flashcards" : {
 
     },
     "Review Due Flashcards" : {
@@ -731,13 +770,10 @@
     "Save answers from the chat, or write your own notes." : {
 
     },
-    "Save as audio file" : {
-
-    },
     "Save to notes" : {
 
     },
-    "Save to Notes" : {
+    "Script progress" : {
 
     },
     "Search notebooks" : {
@@ -797,10 +833,10 @@
     "Space to flip · 1–4 to grade" : {
 
     },
-    "Spaced repetition across %lld flashcards" : {
+    "Spaced repetition" : {
 
     },
-    "Speaking rate" : {
+    "Spaced repetition · %lld cards" : {
 
     },
     "Speed" : {
@@ -819,6 +855,9 @@
 
     },
     "Stop and delete the partial download" : {
+
+    },
+    "Stop creating" : {
 
     },
     "Stop generating" : {
@@ -854,16 +893,7 @@
     "This frees %@. You can download it again later." : {
 
     },
-    "This item was deleted" : {
-
-    },
     "This Mac" : {
-
-    },
-    "Title" : {
-
-    },
-    "Try Again" : {
 
     },
     "Try the Sample" : {
@@ -879,6 +909,9 @@
 
     },
     "Unload" : {
+
+    },
+    "Untitled note" : {
 
     },
     "Use" : {

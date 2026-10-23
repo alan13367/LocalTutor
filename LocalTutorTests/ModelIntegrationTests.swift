@@ -45,8 +45,9 @@ struct ModelIntegrationTests {
         let instructions = ChatContextPlanner.instructions(
             notebookTitle: "Biology",
             sourceNames: ["notes.md"],
-            excerpts: Integration.notes
+            excerpts: nil
         )
+        let firstQuestion = "Where does the oxygen released by photosynthesis come from?"
 
         let first = try await Integration.runner.chat(
             request: ChatInferenceRequest(
@@ -55,7 +56,7 @@ struct ModelIntegrationTests {
                 conversationID: conversation,
                 instructions: instructions,
                 history: [],
-                message: "Where does the oxygen released by photosynthesis come from?",
+                message: "Relevant source excerpts for this question:\n\n\(Integration.notes)\n\nQuestion: \(firstQuestion)",
                 images: [],
                 maxTokens: 160
             )
@@ -70,7 +71,7 @@ struct ModelIntegrationTests {
                 runtimePolicy: policy,
                 conversationID: conversation,
                 instructions: instructions,
-                history: [ChatHistoryMessage(question: "Where does the oxygen released by photosynthesis come from?", answer: first.output)],
+                history: [ChatHistoryMessage(question: firstQuestion, answer: ReasoningOutputFilter.sanitize(first.output) + "\n")],
                 message: "Which enzyme fixes carbon dioxide?",
                 images: [],
                 maxTokens: 120
@@ -82,9 +83,11 @@ struct ModelIntegrationTests {
         if speculative, profile.supportsSpeculativeDecoding {
             #expect((second.tokenMetrics.acceptedDraftTokens ?? 0) > 0)
         }
+        #if DEBUG
         print("[integration] diagnostics: \(await Integration.runner.conversationDiagnostics().prefix(3_000))")
-        #expect((second.tokenMetrics.cachedPromptTokens ?? 0) > 0)
-        #expect((second.tokenMetrics.promptTokens ?? .max) < (first.tokenMetrics.promptTokens ?? 0))
+        #endif
+        #expect((second.tokenMetrics.cachedPromptTokens ?? 0) >= (first.tokenMetrics.promptTokens ?? .max))
+        #expect((second.tokenMetrics.promptTokens ?? .max) < 40)
     }
 
     @Test(.timeLimit(.minutes(30)))
@@ -687,6 +690,81 @@ struct NotebookSummaryEvaluation {
             print("[eval] warnings: \(content.warnings)")
             print("[eval-output-begin \(variant)]\n\(record.output)\n[eval-output-end \(variant)]")
         }
+    }
+}
+
+@Suite(.serialized, .enabled(if: Integration.isEnabled && Integration.profile.id == "flint40B_A2B"))
+struct FlintIntegrationTests {
+    @Test(.timeLimit(.minutes(60)))
+    func flintReasonsThenAnswersWithHexLiteralsIntactAndReusesTheCache() async throws {
+        let profile = Integration.profile
+        await Integration.runner.setSpeculativeDecoding(false)
+        let policy = ModelRuntimePolicyProvider.policy(for: profile)
+        let instructions = ChatContextPlanner.instructions(
+            notebookTitle: "Computer Architecture",
+            sourceNames: ["cpu.md"],
+            excerpts: "[1] cpu.md | Registers\nThe status register at address 0x00FF holds the carry, zero and overflow flags. After reset the program counter starts at 0x0400."
+        )
+        let conversation = UUID()
+        let question = "At which address is the status register, and which flags does it hold?"
+        let reasoning = ReasoningRecorder()
+
+        let first = try await Integration.runner.chat(
+            request: ChatInferenceRequest(
+                profile: profile, runtimePolicy: policy, conversationID: conversation,
+                instructions: instructions, history: [], message: question, images: [], maxTokens: 4_096
+            )
+        ) { event in
+            if case .reasoningChunk(let chunk) = event { await reasoning.append(chunk) }
+        }
+        try #require(first.status == .success, "\(first.errorMessage ?? "")")
+        print("[flint] turn 1: \(ChatController.performanceSummary(first)) prompt=\(first.tokenMetrics.promptTokens ?? -1) generated=\(first.tokenMetrics.generatedTokens ?? -1) reasoning=\(await reasoning.text.count) chars")
+        print("[flint] answer 1: \(first.output.prefix(600))")
+        #expect(first.output.contains("0x00FF"))
+        #expect(first.output.localizedCaseInsensitiveContains("carry"))
+        #expect(!first.output.contains("<think>") && !first.output.contains("</think>"))
+
+        let second = try await Integration.runner.chat(
+            request: ChatInferenceRequest(
+                profile: profile, runtimePolicy: policy, conversationID: conversation,
+                instructions: instructions,
+                history: [ChatHistoryMessage(question: question, answer: ReasoningOutputFilter.sanitize(first.output))],
+                message: "Where does the program counter start after reset?", images: [], maxTokens: 4_096
+            )
+        ) { _ in }
+        try #require(second.status == .success, "\(second.errorMessage ?? "")")
+        print("[flint] turn 2: \(ChatController.performanceSummary(second)) prompt=\(second.tokenMetrics.promptTokens ?? -1) cached=\(second.tokenMetrics.cachedPromptTokens ?? -1)")
+        print("[flint] answer 2: \(second.output.prefix(400))")
+        #expect(second.output.contains("0x0400"))
+        #expect((second.tokenMetrics.cachedPromptTokens ?? 0) >= (first.tokenMetrics.promptTokens ?? .max))
+    }
+
+    @Test(.timeLimit(.minutes(30)))
+    func flintWritesParseableFlashcards() async throws {
+        let profile = Integration.profile
+        let policy = ModelRuntimePolicyProvider.policy(for: profile)
+        let content = StudyPromptContent(
+            systemInstruction: StudyPromptBuilder.systemInstruction,
+            openingText: StudyResourceKind.flashcards.promptInstruction,
+            sourceBlocks: [.text(Integration.notes)],
+            closingText: StudyResourceKind.flashcards.jsonSchemaInstruction ?? "",
+            includedImageCount: 0,
+            omittedImageCount: 0,
+            imageFilenames: [],
+            warnings: []
+        )
+        let record = try await Integration.runner.generateStructured(
+            request: InferenceRequest(profile: profile, runtimePolicy: policy, promptContent: content, maxTokens: 1_500, temperature: 0.2),
+            jsonSchema: try #require(StudyResourceKind.flashcards.jsonSchema)
+        ) { _ in }
+        try #require(record.status == .success, "\(record.errorMessage ?? "")")
+        print("[flint] flashcards: \(ChatController.performanceSummary(record))")
+        guard case .flashcards(let deck) = StudyArtifactParser.parse(record.output, kind: .flashcards) else {
+            Issue.record("Guided output did not parse: \(record.output.prefix(400))")
+            return
+        }
+        print("[flint] first card: \(deck.cards.first.map { "\($0.front) — \($0.back)" } ?? "none")")
+        #expect(deck.cards.count >= 6)
     }
 }
 
